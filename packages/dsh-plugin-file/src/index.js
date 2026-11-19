@@ -92,42 +92,45 @@ export function apply(ctx, config = {}) {
 /**
  * Serve the inventory to the sidebar panel.
  *
- * Registered only when a web server is mounted, so a headless composition
- * carrying this bundle keeps working.
+ * Registered through `ctx.inject` so the callback runs only once a web server
+ * is actually available. Reading `ctx.get('webServer')` during `apply` can
+ * return undefined while the server row is still activating, which would leave
+ * the route permanently unregistered and the panel answering 404.
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {{ inventory: () => Promise<object> }} inventory
  */
 function registerInventoryRoute(ctx, inventory) {
-  // A composition without a web server simply has no panel to serve; the
-  // lookup must not be able to fail plugin activation.
-  let webServer
-  try {
-    webServer = ctx.get('webServer')
-  } catch (error) {
-    ctx.logger.warn(`plugin-file: web server lookup failed: ${describe(error)}`)
-    return
-  }
-  if (webServer === undefined) return
+  ctx.inject(['webServer'], (inner) => {
+    const webServer = inner.get('webServer')
+    // A composition can declare the seat without binding a server. That is a
+    // normal headless arrangement, not a defect worth a warning.
+    if (webServer === undefined) return
 
-  // Register eagerly and hand the returned disposer to the effect: the route
-  // must exist as soon as the plugin activates, not on teardown.
-  const disposeRoute = webServer.register({
-    kind: 'exact',
-    path: '/api/plugin-file/inventory',
-    resource: async () => {
-      try {
-        return Response.json(await inventory.inventory())
-      } catch (error) {
-        return Response.json(
-          { error: error instanceof Error ? error.message : String(error) },
-          { status: 500 },
-        )
-      }
-    },
+    try {
+      const disposeRoute = webServer.register({
+        kind: 'exact',
+        path: '/api/plugin-file/inventory',
+        resource: async () => {
+          try {
+            return Response.json(await inventory.inventory())
+          } catch (error) {
+            return Response.json(
+              { error: error instanceof Error ? error.message : String(error) },
+              { status: 500 },
+            )
+          }
+        },
+      })
+
+      inner.effect(() => disposeRoute, 'plugin-file inventory route')
+      ctx.logger.info('plugin-file: inventory route registered at /api/plugin-file/inventory')
+    } catch (error) {
+      // A duplicate path or an unbound server is a composition conflict; say
+      // so instead of leaving the panel to fail with an unexplained 404.
+      ctx.logger.warn(`plugin-file: inventory route was not registered: ${describe(error)}`)
+    }
   })
-
-  ctx.effect(() => disposeRoute, 'plugin-file inventory route')
 }
 
 /**

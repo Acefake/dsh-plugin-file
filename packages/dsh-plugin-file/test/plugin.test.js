@@ -61,6 +61,20 @@ function fakeContext() {
       registrations.provided.set(name, value)
       return () => {}
     },
+    // Cordis runs the callback once every named service is available, and a
+    // lookup it cannot satisfy simply does not run the callback. The stand-in
+    // mirrors that: a throwing or missing lookup skips the callback rather
+    // than aborting activation.
+    inject(names, callback) {
+      const inner = { get: (name) => ctx.get(name), effect: (fn, label) => ctx.effect(fn, label) }
+      try {
+        callback(inner)
+      } catch {
+        // A service the composition does not provide leaves the contribution
+        // absent, exactly as an unsatisfied inject would.
+      }
+      return { dispose() {} }
+    },
     // Cordis exposes an optional service through `ctx.get(name)`; a direct
     // property read throws when the composition does not mount it, so the
     // plugin must use this form and the stand-in must match.

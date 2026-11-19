@@ -138,19 +138,17 @@ window.__ModuleLoader__.load({
     /**
      * Read the Host inventory over the route the plugin registers.
      *
-     * A plain route rather than a generated Remote: this bundle ships no
-     * Typert artifacts, and one read-only GET does not justify introducing
-     * them. The route answers only authenticated owner peers.
-     *
      * @returns {Promise<{ root: string, plugins: object[] }>}
      */
     async function readInventory() {
-      const response = await fetch('/api/plugin-file/inventory', {
+      const url = '/api/plugin-file/inventory'
+      const response = await fetch(url, {
         headers: { accept: 'application/json' },
         credentials: 'same-origin',
       })
       if (!response.ok) {
-        throw new Error(`${String(response.status)} ${response.statusText}`)
+        const detail = await response.text().catch(() => '')
+        throw new Error(`${url} -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`)
       }
       return response.json()
     }
