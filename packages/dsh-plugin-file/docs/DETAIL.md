@@ -80,6 +80,12 @@ The body becomes the agent's persona. A `tools` field is parsed and kept as meta
 
 Editing a skill or command file takes effect without a restart. Adding or removing a plugin directory is picked up too.
 
+## Sidebar panel
+
+The bundle adds a **File plugins** entry to the left sidebar. Selecting it opens a panel listing every discovered plugin with the skills, agents, and hooks it contributes, plus the directory being scanned.
+
+The panel reads `/api/plugin-file/inventory`, a read-only route the Host half registers while a web server is mounted. In a headless composition the route is absent and the rest of the plugin still works.
+
 ## Marketplace
 
 `plugins-index.json` in the repository root publishes this plugin for the Discover page. Add its raw URL under plugin indexes to browse it from the Web GUI.

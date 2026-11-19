@@ -17,12 +17,14 @@
   "icon": "icon.svg",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
     "src",
+    "client.js",
     "locale/*.json",
     "cordis.patch.yml",
     "icon.svg",
@@ -34,6 +36,9 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   }
 }

@@ -38,6 +38,34 @@ const DEFAULTS = {
 }
 
 /**
+ * Read-only view of what the loader discovered, for the sidebar panel.
+ *
+ * A plain object published through `ctx.provide` rather than a `Service`
+ * subclass: this package holds no Cordis import, so it stays installable and
+ * testable without resolving the Host's framework copy.
+ *
+ * @param {FilePluginLoader} loader
+ * @returns {{ inventory: () => Promise<object> }}
+ */
+function inventoryService(loader) {
+  return {
+    /**
+     * Re-read the plugin root and describe every plugin it holds.
+     *
+     * @returns {Promise<{ root: string, plugins: Array<{
+     *   name: string, dir: string, description?: string,
+     *   skills: number, agents: number, hasHooks: boolean,
+     *   skillsNamed: string[], agentsNamed: string[]
+     * }> }>}
+     */
+    async inventory() {
+      await loader.refresh()
+      return { root: loader.root, plugins: loader.inventory() }
+    },
+  }
+}
+
+/**
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {Config} config
  */
@@ -50,12 +78,56 @@ export function apply(ctx, config = {}) {
 
   const loader = new FilePluginLoader(ctx, root, settings)
   ctx.skills.registerProvider((control) => loader.createProvider(control))
+  const inventory = inventoryService(loader)
+  ctx.provide('pluginFile', inventory)
+  registerInventoryRoute(ctx, inventory)
 
   ctx.effect(function* () {
     yield async () => {
       await loader.dispose()
     }
   }, 'plugin-file loader')
+}
+
+/**
+ * Serve the inventory to the sidebar panel.
+ *
+ * Registered only when a web server is mounted, so a headless composition
+ * carrying this bundle keeps working.
+ *
+ * @param {import('@deepseek-ai/cordis').Context} ctx
+ * @param {{ inventory: () => Promise<object> }} inventory
+ */
+function registerInventoryRoute(ctx, inventory) {
+  // A composition without a web server simply has no panel to serve; the
+  // lookup must not be able to fail plugin activation.
+  let webServer
+  try {
+    webServer = ctx.get('webServer')
+  } catch (error) {
+    ctx.logger.warn(`plugin-file: web server lookup failed: ${describe(error)}`)
+    return
+  }
+  if (webServer === undefined) return
+
+  // Register eagerly and hand the returned disposer to the effect: the route
+  // must exist as soon as the plugin activates, not on teardown.
+  const disposeRoute = webServer.register({
+    kind: 'exact',
+    path: '/api/plugin-file/inventory',
+    resource: async () => {
+      try {
+        return Response.json(await inventory.inventory())
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : String(error) },
+          { status: 500 },
+        )
+      }
+    },
+  })
+
+  ctx.effect(() => disposeRoute, 'plugin-file inventory route')
 }
 
 /**
@@ -178,6 +250,33 @@ class FilePluginLoader {
     }
 
     return warnings.length === 0
+  }
+
+  /**
+   * Describe the plugins the last refresh found, for display.
+   *
+   * Shapes only what a reader needs to recognize a plugin; the full entry list
+   * stays internal so a panel cannot become a second source of truth.
+   *
+   * @returns {Array<{ name: string, dir: string, description?: string,
+   *   skills: number, agents: number, hasHooks: boolean,
+   *   skillsNamed: string[], agentsNamed: string[] }>}
+   */
+  inventory() {
+    return [...this.#plugins.values()]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((plugin) => ({
+        name: plugin.name,
+        dir: plugin.dir,
+        ...(plugin.manifest.description === undefined
+          ? {}
+          : { description: plugin.manifest.description }),
+        skills: plugin.skills.length,
+        agents: plugin.agents.length,
+        hasHooks: plugin.hooksPath !== undefined,
+        skillsNamed: plugin.skills.map((entry) => entry.name),
+        agentsNamed: plugin.agents.map((entry) => entry.name),
+      }))
   }
 
   /**

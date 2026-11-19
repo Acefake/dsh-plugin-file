@@ -35,17 +35,31 @@ function fakeContext() {
         return async () => {}
       },
     },
-    effect(generator, label) {
-      const iterator = generator()
-      const first = iterator.next()
+    effect(subject, label) {
       registrations.effects ??= []
-      registrations.effects.push({ label, cleanup: first.value })
+      // Cordis accepts a disposer function or a generator of disposers.
+      const cleanup =
+        typeof subject === 'function'
+          ? subject
+          : (() => {
+              const iterator = subject()
+              iterator.next()
+              return () => {}
+            })()
+      registrations.effects.push({ label, cleanup })
       return () => {}
     },
     logger: {
       warn(message) {
         registrations.warned.push(message)
       },
+    },
+    // Cordis publishes a plugin-owned service through `provide`; the loader
+    // exposes the inventory this way so the sidebar panel can read it.
+    provide(name, value) {
+      registrations.provided ??= new Map()
+      registrations.provided.set(name, value)
+      return () => {}
     },
     // Cordis exposes an optional service through `ctx.get(name)`; a direct
     // property read throws when the composition does not mount it, so the
@@ -204,6 +218,67 @@ test('a missing plugin root lists nothing and warns about nothing', async () => 
 
   assert.deepEqual(listed, [])
   assert.deepEqual(registrations.warned, [])
+})
+
+test('the inventory service describes each discovered plugin', async () => {
+  await withRoot(async (root) => {
+    await write(root, 'demo/plugin.json', JSON.stringify({ description: 'Demo plugin' }))
+    await write(root, 'demo/skills/greeter/SKILL.md', '---\nname: greeter\ndescription: d\n---\nb\n')
+    await write(root, 'demo/commands/review.md', '---\ndescription: d\n---\nb\n')
+    await write(root, 'demo/agents/reviewer.md', '---\nname: reviewer\ndescription: d\n---\nbody\n')
+    await write(root, 'demo/hooks/hooks.json', '{}')
+
+    const { ctx, registrations } = fakeContext()
+    apply(ctx, { pluginRoot: root, watch: false })
+
+    const service = registrations.provided.get('pluginFile')
+    assert.ok(service !== undefined)
+
+    const value = await service.inventory()
+
+    assert.equal(value.root, root)
+    assert.equal(value.plugins.length, 1)
+
+    const plugin = value.plugins[0]
+    assert.equal(plugin.name, 'demo')
+    assert.equal(plugin.description, 'Demo plugin')
+    assert.equal(plugin.skills, 2)
+    assert.equal(plugin.agents, 1)
+    assert.equal(plugin.hasHooks, true)
+    assert.deepEqual(plugin.skillsNamed.sort(), ['greeter', 'review'])
+    assert.deepEqual(plugin.agentsNamed, ['reviewer'])
+  })
+})
+
+test('the inventory route answers with the same service value', async () => {
+  await withRoot(async (root) => {
+    await write(root, 'demo/plugin.json', '{}')
+    await write(root, 'demo/skills/one.md', '---\nname: one\ndescription: d\n---\nb\n')
+
+    const { ctx, registrations } = fakeContext()
+    const routes = []
+    ctx.get = (name) =>
+      name === 'webServer'
+        ? {
+            register(route) {
+              routes.push(route)
+              return () => {}
+            },
+          }
+        : name === 'agentPresets'
+          ? ctx.agentPresets
+          : undefined
+
+    apply(ctx, { pluginRoot: root, watch: false })
+
+    assert.equal(routes.length, 1)
+    assert.equal(routes[0].path, '/api/plugin-file/inventory')
+
+    const response = await routes[0].resource()
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.plugins[0].name, 'demo')
+  })
 })
 
 test('a preset registry that throws does not remove the skill catalog', async () => {
