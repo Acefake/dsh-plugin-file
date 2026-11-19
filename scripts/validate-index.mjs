@@ -20,7 +20,7 @@ const here = import.meta.dirname
 const repoRoot = join(here, '..')
 const indexPath = join(repoRoot, 'plugins-index.json')
 const indexUrl =
-  'https://raw.githubusercontent.com/dsh-plugin-file/dsh-plugin-file/main/plugins-index.json'
+  'https://raw.githubusercontent.com/Acefake/dsh-plugin-file/main/plugins-index.json'
 
 const installDir = process.env.DSH_INSTALL_DIR
 if (installDir === undefined || installDir === '') {

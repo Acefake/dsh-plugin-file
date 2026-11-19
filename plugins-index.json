@@ -45,7 +45,7 @@
       },
       "author": "dsh-plugin-file",
       "repository": {
-        "url": "https://github.com/dsh-plugin-file/dsh-plugin-file",
+        "url": "https://github.com/Acefake/dsh-plugin-file",
         "directory": "packages/dsh-plugin-file"
       },
       "metadata": {
@@ -68,8 +68,8 @@
           "publishTimestamp": 1794937800,
           "source": {
             "type": "git",
-            "url": "https://github.com/dsh-plugin-file/dsh-plugin-file",
-            "commit": "245dd1ba79afce5f89ad83ba35d979f334b4d6ab",
+            "url": "https://github.com/Acefake/dsh-plugin-file",
+            "commit": "5de3ce3818000b18b8d3e677d097d6ff25c7d133",
             "path": "packages/dsh-plugin-file"
           }
         }

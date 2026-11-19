@@ -24,10 +24,10 @@ Claude Code made this shape famous: a plugin is a folder. This loader gives DSH 
 From the plugin index:
 
 ```sh
-dsh plugin --profile <name> add "git+https://github.com/dsh-plugin-file/dsh-plugin-file.git#<commit>&path:/packages/dsh-plugin-file"
+dsh plugin --profile <name> add "git+https://github.com/Acefake/dsh-plugin-file.git#<commit>&path:/packages/dsh-plugin-file"
 ```
 
-Or add `https://raw.githubusercontent.com/dsh-plugin-file/dsh-plugin-file/main/plugins-index.json` as a plugin index and install from **Plugins → Discover**.
+Or add `https://raw.githubusercontent.com/Acefake/dsh-plugin-file/main/plugins-index.json` as a plugin index and install from **Plugins → Discover**.
 
 ## Update
 
