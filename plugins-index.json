@@ -69,7 +69,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/Acefake/dsh-plugin-file",
-            "commit": "5de3ce3818000b18b8d3e677d097d6ff25c7d133",
+            "commit": "a9fad5c43ea31f007691a3733300a5f25565e8e6",
             "path": "packages/dsh-plugin-file"
           }
         }
