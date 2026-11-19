@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
         'group.installed': 'Installed',
         'group.markets': 'Marketplaces',
         'group.empty': 'No plugins here yet',
-        'group.emptyHint': 'Add a marketplace, or paste a link above.',
+        'group.emptyHint': 'Plugins come from a marketplace: add one, then install from it.',
         'group.root': 'Plugin directory',
         'row.skills': 'skills',
         'row.agents': 'agents',
@@ -52,8 +52,12 @@ window.__ModuleLoader__.load({
         'market.count': 'plugins',
         'market.failed': 'Could not read this marketplace',
         'market.none': 'No marketplaces yet',
-        'market.noneHint': 'Add a GitHub repository that holds a marketplace.json.',
+        'market.noneHint': 'Add a GitHub repository that holds a marketplace.json — the plugins it lists appear here.',
         'market.empty': 'This marketplace lists no installable plugins',
+        'market.step': 'Step 1 · add a marketplace',
+        'market.stepHint': 'A marketplace is one JSON file that lists plugins. Add its repository once; its plugins stay one click away.',
+        'installed.step': 'Plugins come from a marketplace',
+        'installed.stepHint': 'Open the Marketplaces tab and install from a source there.',
         'action.install': 'Install',
         'action.installed': 'Installed',
         'tabs.markets': 'Marketplaces',
@@ -76,7 +80,7 @@ window.__ModuleLoader__.load({
         'group.installed': '已安装',
         'group.markets': '市场',
         'group.empty': '还没有插件',
-        'group.emptyHint': '先添加一个市场，或者把链接粘到上面的输入框。',
+        'group.emptyHint': '插件来自市场：先添加一个市场，再从里面安装。',
         'group.root': '插件目录',
         'row.skills': '个技能',
         'row.agents': '个子代理',
@@ -100,8 +104,12 @@ window.__ModuleLoader__.load({
         'market.count': '个插件',
         'market.failed': '无法读取这个市场',
         'market.none': '还没有市场',
-        'market.noneHint': '添加一个带 marketplace.json 的 GitHub 仓库。',
+        'market.noneHint': '添加一个带 marketplace.json 的 GitHub 仓库，它列出的插件会出现在这里。',
         'market.empty': '这个市场没有可安装的插件',
+        'market.step': '第 1 步 · 先添加市场',
+        'market.stepHint': '市场就是一个列出插件的 JSON 文件。加一次，里面的插件以后点一下就能装。',
+        'installed.step': '插件来自市场',
+        'installed.stepHint': '先到「市场」标签里添加一个源，再从那里安装。',
         'action.install': '安装',
         'action.installed': '已安装',
         'tabs.markets': '市场',
@@ -349,8 +357,8 @@ window.__ModuleLoader__.load({
       list: { display: 'flex', flexDirection: 'column', margin: 0, padding: 0, listStyle: 'none' },
       row: {
         display: 'grid',
-        gridTemplateColumns: '34px 1fr auto',
-        alignItems: 'center',
+        gridTemplateColumns: '34px 1fr',
+        alignItems: 'start',
         columnGap: '14px',
         padding: '12px 12px',
         margin: '0 -12px',
@@ -385,6 +393,12 @@ window.__ModuleLoader__.load({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+      },
+      rowMetaInline: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '11px',
+        fontVariantNumeric: 'tabular-nums',
+        marginTop: '2px',
       },
       rowMeta: {
         color: 'var(--dsw-alias-label-secondary)',
@@ -519,11 +533,11 @@ window.__ModuleLoader__.load({
     /**
      * @param {{ plugin: object, onHover: (hovered: boolean) => void }} props
      */
-    function PluginRow({ plugin, onHover }) {
+    function PluginRow({ plugin, onHover, t = translate }) {
       const parts = []
-      if (plugin.skills > 0) parts.push(`${String(plugin.skills)} ${translate('row.skills')}`)
-      if (plugin.agents > 0) parts.push(`${String(plugin.agents)} ${translate('row.agents')}`)
-      if (plugin.hasHooks) parts.push(translate('row.hooks'))
+      if (plugin.skills > 0) parts.push(`${String(plugin.skills)} ${t('row.skills')}`)
+      if (plugin.agents > 0) parts.push(`${String(plugin.agents)} ${t('row.agents')}`)
+      if (plugin.hasHooks) parts.push(t('row.hooks'))
 
       const glyph = plugin.hasIcon
         ? h('img', {
@@ -533,6 +547,8 @@ window.__ModuleLoader__.load({
             loading: 'lazy',
           })
         : h('span', { style: styles.iconFallback, 'aria-hidden': 'true' }, plugin.name.slice(0, 1))
+
+      const meta = parts.length === 0 ? t('row.empty') : parts.join(' · ')
 
       return h(
         'li',
@@ -545,14 +561,17 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { style: styles.rowText },
+          // The name owns the first line; the counts and the description share
+          // the lines beneath it, so a long description never fights the
+          // numbers for the same row edge.
           h('span', { style: styles.rowName }, plugin.name),
           h(
             'span',
             { style: styles.rowDesc },
             plugin.description ?? plugin.skillsNamed.slice(0, 3).map((name) => `/${name}`).join('  ') ?? '',
           ),
+          h('span', { style: styles.rowMetaInline }, meta),
         ),
-        h('span', { style: styles.rowMeta }, parts.length === 0 ? translate('row.empty') : parts.join(' · ')),
       )
     }
 
@@ -641,7 +660,7 @@ window.__ModuleLoader__.load({
      *
      * @param {{ source: object, onRemove: (id: string) => void, onInstall: (url: string) => void }} props
      */
-    function MarketSection({ source, onRemove, onInstall }) {
+    function MarketSection({ source, onRemove, onInstall, t = translate }) {
       const plugins = source.plugins ?? []
 
       return h(
@@ -651,7 +670,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.marketBar },
           h('span', { style: styles.name }, source.source.name),
-          h('span', { style: styles.groupCount }, `${String(plugins.length)} ${translate('market.count')}`),
+          h('span', { style: styles.groupCount }, `${String(plugins.length)} ${t('market.count')}`),
           h(
             'button',
             {
@@ -660,14 +679,14 @@ window.__ModuleLoader__.load({
               style: { ...styles.ghost, marginLeft: 'auto' },
               title: source.source.id,
             },
-            translate('market.remove'),
+            t('market.remove'),
           ),
         ),
         source.error === undefined
           ? null
-          : h('p', { style: styles.marketError }, `${translate('market.failed')}: ${source.error}`),
+          : h('p', { style: styles.marketError }, `${t('market.failed')}: ${source.error}`),
         plugins.length === 0 && source.error === undefined
-          ? h('p', { style: styles.rowMeta }, translate('market.empty'))
+          ? h('p', { style: styles.rowMeta }, t('market.empty'))
           : h(
               'ul',
               { style: styles.list },
@@ -687,7 +706,7 @@ window.__ModuleLoader__.load({
                     h('span', { style: styles.rowDesc }, entry.description ?? entry.installUrl),
                   ),
                   entry.installed
-                    ? h('span', { style: styles.installChip(true) }, translate('action.installed'))
+                    ? h('span', { style: styles.installChip(true) }, t('action.installed'))
                     : h(
                         'button',
                         {
@@ -695,7 +714,7 @@ window.__ModuleLoader__.load({
                           onClick: () => onInstall(entry.installUrl),
                           style: styles.installChip(false),
                         },
-                        translate('action.install'),
+                        t('action.install'),
                       ),
                 ),
               ),
@@ -705,8 +724,15 @@ window.__ModuleLoader__.load({
 
     /**
      * The main-slot page.
+     *
+     * `t` arrives from the slot runtime because the registration names a locale
+     * namespace. The module-level `translate` stays as a fallback for the case
+     * where the locale service never mounts; it reads the same keys.
+     *
+     * @param {{ t?: (key: string) => string }} props
      */
-    function PanelPage() {
+    function PanelPage(props) {
+      const t = typeof props?.t === 'function' ? props.t : translate
       const [state, setState] = React.useState({ status: 'loading' })
       const [query, setQuery] = React.useState('')
       const [adding, setAdding] = React.useState(false)
@@ -904,7 +930,7 @@ window.__ModuleLoader__.load({
       )
 
       if (state.status === 'loading') {
-        return h('div', { style: styles.page }, h('div', { style: styles.column }, h('p', { style: styles.subtitle }, translate('page.reading'))))
+        return h('div', { style: styles.page }, h('div', { style: styles.column }, h('p', { style: styles.subtitle }, t('page.reading'))))
       }
 
       if (state.status === 'error') {
@@ -915,7 +941,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: styles.column },
             h('p', { style: { ...styles.subtitle, color: 'var(--dsw-alias-state-error-primary)' } },
-              `${translate('page.error')}: ${String(state.error)}`),
+              `${t('page.error')}: ${String(state.error)}`),
           ),
         )
       }
@@ -945,8 +971,8 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { style: styles.headerText },
-              h('h1', { style: styles.title }, translate('page.title')),
-              h('p', { style: styles.subtitle }, translate('page.subtitle')),
+              h('h1', { style: styles.title }, t('page.title')),
+              h('p', { style: styles.subtitle }, t('page.subtitle')),
             ),
             h(
               'div',
@@ -959,8 +985,8 @@ window.__ModuleLoader__.load({
                   type: 'search',
                   value: query,
                   onChange: (event) => setQuery(event.target.value),
-                  placeholder: translate('page.search'),
-                  'aria-label': translate('page.search'),
+                  placeholder: t('page.search'),
+                  'aria-label': t('page.search'),
                   style: styles.searchInput,
                 }),
               ),
@@ -975,7 +1001,7 @@ window.__ModuleLoader__.load({
                   'aria-expanded': adding,
                   style: styles.addButton,
                 },
-                translate('page.add'),
+                t('page.add'),
               ),
             ),
           ),
@@ -987,18 +1013,18 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: styles.addHead },
-                  h('span', { style: styles.addTitle }, translate('add.title')),
-                  h('p', { style: styles.addHint }, translate('add.hint')),
+                  h('span', { style: styles.addTitle }, t('add.title')),
+                  h('p', { style: styles.addHint }, t('add.hint')),
                 ),
                 h('input', {
                   type: 'url',
                   value: draft,
                   onChange: (event) => setDraft(event.target.value),
-                  placeholder: translate('add.placeholder'),
+                  placeholder: t('add.placeholder'),
                   spellCheck: false,
                   autoFocus: true,
                   disabled: installing,
-                  'aria-label': translate('add.placeholder'),
+                  'aria-label': t('add.placeholder'),
                   style: styles.addInput,
                 }),
                 h(
@@ -1014,7 +1040,7 @@ window.__ModuleLoader__.load({
                       },
                       style: styles.secondary,
                     },
-                    translate('add.cancel'),
+                    t('add.cancel'),
                   ),
                   h(
                     'button',
@@ -1023,7 +1049,7 @@ window.__ModuleLoader__.load({
                       disabled: installing || draft.trim() === '',
                       style: styles.primary(!installing && draft.trim() !== ''),
                     },
-                    installing ? translate('add.working') : translate('add.action'),
+                    installing ? t('add.working') : t('add.action'),
                   ),
                 ),
               )
@@ -1035,8 +1061,8 @@ window.__ModuleLoader__.load({
                 'p',
                 { style: styles.notice(outcome.ok) },
                 outcome.ok
-                  ? `${translate('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${translate('row.skills')} · ${String(outcome.agents ?? 0)} ${translate('row.agents')}`
-                  : `${translate('add.failed')}: ${outcome.error?.message ?? ''}`,
+                  ? `${t('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${t('row.skills')} · ${String(outcome.agents ?? 0)} ${t('row.agents')}`
+                  : `${t('add.failed')}: ${outcome.error?.message ?? ''}`,
               ),
 
           h(
@@ -1051,7 +1077,7 @@ window.__ModuleLoader__.load({
                 onClick: () => setTab('markets'),
                 style: styles.tab(tab === 'markets'),
               },
-              translate('tabs.markets'),
+              t('tabs.markets'),
               h(
                 'span',
                 { style: styles.tabCount },
@@ -1068,7 +1094,7 @@ window.__ModuleLoader__.load({
                 onClick: () => setTab('installed'),
                 style: styles.tab(tab === 'installed'),
               },
-              translate('tabs.installed'),
+              t('tabs.installed'),
               h('span', { style: styles.tabCount }, String(plugins.length)),
             ),
           ),
@@ -1081,8 +1107,8 @@ window.__ModuleLoader__.load({
                   'span',
                   { style: styles.updateText },
                   pending.count > 0
-                    ? translate('update.detail').replace('{count}', String(pending.count))
-                    : translate('update.available'),
+                    ? t('update.detail').replace('{count}', String(pending.count))
+                    : t('update.available'),
                 ),
                 h(
                   'button',
@@ -1094,7 +1120,7 @@ window.__ModuleLoader__.load({
                     },
                     style: styles.updateAction,
                   },
-                  translate('update.check'),
+                  t('update.check'),
                 ),
                 h(
                   'button',
@@ -1103,7 +1129,7 @@ window.__ModuleLoader__.load({
                     onClick: () => setPending(undefined),
                     style: { ...styles.updateAction, marginLeft: '0' },
                   },
-                  translate('update.dismiss'),
+                  t('update.dismiss'),
                 ),
               )
             : null,
@@ -1120,10 +1146,10 @@ window.__ModuleLoader__.load({
                     type: 'url',
                     value: marketDraft,
                     onChange: (event) => setMarketDraft(event.target.value),
-                    placeholder: translate('market.addPlaceholder'),
+                    placeholder: t('market.addPlaceholder'),
                     spellCheck: false,
                     disabled: addingMarket,
-                    'aria-label': translate('market.addPlaceholder'),
+                    'aria-label': t('market.addPlaceholder'),
                     style: styles.marketInput,
                   }),
                   h(
@@ -1133,7 +1159,7 @@ window.__ModuleLoader__.load({
                       disabled: addingMarket || marketDraft.trim() === '',
                       style: styles.primary(!addingMarket && marketDraft.trim() !== ''),
                     },
-                    addingMarket ? translate('market.adding') : translate('market.add'),
+                    addingMarket ? t('market.adding') : t('market.add'),
                   ),
                   h(
                     'button',
@@ -1143,25 +1169,26 @@ window.__ModuleLoader__.load({
                       disabled: markets.status === 'loading',
                       style: styles.secondary,
                     },
-                    markets.status === 'loading' ? translate('market.refreshing') : translate('market.refresh'),
+                    markets.status === 'loading' ? t('market.refreshing') : t('market.refresh'),
                   ),
                 ),
 
                 markets.status === 'error'
-                  ? h('p', { style: styles.marketError }, `${translate('market.failed')}: ${String(markets.error)}`)
+                  ? h('p', { style: styles.marketError }, `${t('market.failed')}: ${String(markets.error)}`)
                   : markets.status === 'loading'
-                    ? h('p', { style: styles.rowMeta }, translate('page.reading'))
+                    ? h('p', { style: styles.rowMeta }, t('page.reading'))
                     : markets.value.sources.length === 0
                       ? h(
                           'div',
-                          { style: styles.empty },
-                          h('span', { style: styles.emptyTitle }, translate('market.none')),
-                          h('span', { style: styles.emptyHint }, translate('market.noneHint')),
+                          { style: { ...styles.empty, paddingTop: '36px' } },
+                          h('span', { style: styles.emptyTitle }, t('market.step')),
+                          h('span', { style: styles.emptyHint }, t('market.stepHint')),
                         )
                       : markets.value.sources.map((source) =>
                           h(MarketSection, {
                             key: source.source.id,
                             source,
+                            t,
                             onRemove: removeMarket,
                             onInstall: installFromMarket,
                           }),
@@ -1173,21 +1200,21 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: styles.groupHead },
-                  h('span', { style: styles.groupTitle }, translate('group.installed')),
+                  h('span', { style: styles.groupTitle }, t('group.installed')),
                   h('span', { style: styles.groupCount }, String(shown.length)),
-                  h('span', { style: styles.groupNote, title: root }, translate('group.root')),
+                  h('span', { style: styles.groupNote, title: root }, t('group.root')),
                 ),
                 shown.length === 0
                   ? h(
                       'div',
                       { style: styles.empty },
-                      h('span', { style: styles.emptyTitle }, plugins.length === 0 ? translate('group.empty') : translate('empty.none')),
-                      h('span', { style: styles.emptyHint }, plugins.length === 0 ? translate('group.emptyHint') : ''),
+                      h('span', { style: styles.emptyTitle }, plugins.length === 0 ? t('group.empty') : t('empty.none')),
+                      h('span', { style: styles.emptyHint }, plugins.length === 0 ? t('group.emptyHint') : ''),
                     )
                   : h(
                       'ul',
                       { style: styles.list },
-                      shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, onHover: () => {} })),
+                      shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, t, onHover: () => {} })),
                     ),
               ),
         ),
@@ -1197,16 +1224,28 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots'],
       apply(ctx) {
-        // The locale service is optional and may activate after this plugin.
-        // Reading it with `ctx.get` during apply would leave the panel on its
-        // English fallback forever, so wait for it explicitly.
-        ctx.inject(['locale'], (inner) => {
-          const locale = inner.get('locale')
-          if (locale === undefined) return
-          localeService = locale
-          locale.register('plugin-file', TEXTS)
-          translate = locale.bind('plugin-file')
-        })
+        // The Client context is restricted: it exposes get/on/provide/effect
+        // and no `inject`. Calling `ctx.inject` throws and takes the whole
+        // apply with it, which is why the panel kept falling back to English.
+        const bind = () => {
+          const locale = ctx.get('locale')
+          if (locale === undefined) return false
+          if (localeService !== locale) {
+            localeService = locale
+            locale.register('plugin-file', TEXTS)
+            translate = locale.bind('plugin-file')
+          }
+          return true
+        }
+
+        // The service may activate after this plugin, and its dictionaries are
+        // keyed per namespace, so binding has to be retried when the language
+        // or the service itself changes.
+        if (!bind()) {
+          ctx.on('locale/change', () => {
+            bind()
+          })
+        }
 
         const slots = ctx.slots
         slots.inject('sidebar.panellist', () =>
@@ -1227,6 +1266,10 @@ window.__ModuleLoader__.load({
             {
               name: 'main',
               key: PANEL_ID,
+              // The slot runtime injects `t` from this namespace directly into
+              // the component, so the page never depends on a module-level
+              // binding that a late locale activation could miss.
+              locale: 'plugin-file',
             },
             PanelPage,
           ),
