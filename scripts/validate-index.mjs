@@ -78,17 +78,21 @@ for (const plugin of parsed.plugins) {
     const { spec } = marketInstallTarget(plugin.name, version)
     const source = version.source
     if (source.type === 'git') {
-      // A commit the repository does not contain installs nothing, and the
-      // schema cannot see the difference.
-      if (head !== undefined && source.commit !== head) {
-        console.error(
-          `  ${plugin.name}@${version.version}: pins ${source.commit}, repository HEAD is ${head} (rerun with --stamp)`,
-        )
-        failure = true
-      }
+      // A pinned commit must exist in this repository. Requiring it to equal
+      // HEAD would be wrong: the index has to be committed too, so its own
+      // commit can never be the one it pins. Reachability is the real rule.
       if (/^0+$/u.test(source.commit)) {
         console.error(`  ${plugin.name}@${version.version}: commit is a placeholder`)
         failure = true
+      } else if (!commitExists(source.commit)) {
+        console.error(
+          `  ${plugin.name}@${version.version}: pins ${source.commit}, which this repository does not contain (rerun with --stamp)`,
+        )
+        failure = true
+      } else if (head !== undefined && source.commit !== head) {
+        console.warn(
+          `  ${plugin.name}@${version.version}: pins ${source.commit}, HEAD is ${head}; the index is behind the code`,
+        )
       }
     }
     console.log(`  ${plugin.name}@${version.version} -> ${spec}`)
@@ -96,3 +100,16 @@ for (const plugin of parsed.plugins) {
 }
 
 process.exit(failure ? 1 : 0)
+
+/** @param {string} commit */
+function commitExists(commit) {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
