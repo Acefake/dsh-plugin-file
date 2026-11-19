@@ -26,8 +26,9 @@ window.__ModuleLoader__.load({
         'page.reading': 'Reading plugins…',
         'page.error': 'Could not read the plugin inventory',
         'group.installed': 'Installed',
+        'group.markets': 'Marketplaces',
         'group.empty': 'No plugins here yet',
-        'group.emptyHint': 'Paste a GitHub or .zip link above to install one.',
+        'group.emptyHint': 'Add a marketplace, or paste a link above.',
         'group.root': 'Plugin directory',
         'row.skills': 'skills',
         'row.agents': 'agents',
@@ -42,6 +43,19 @@ window.__ModuleLoader__.load({
         'add.ok': 'Installed',
         'add.failed': 'Install failed',
         'empty.none': 'No plugins matched',
+        'market.add': 'Add marketplace',
+        'market.addPlaceholder': 'https://github.com/owner/repo (a marketplace)',
+        'market.adding': 'Adding…',
+        'market.refresh': 'Refresh',
+        'market.refreshing': 'Refreshing…',
+        'market.remove': 'Remove',
+        'market.count': 'plugins',
+        'market.failed': 'Could not read this marketplace',
+        'market.none': 'No marketplaces yet',
+        'market.noneHint': 'Add a GitHub repository that holds a marketplace.json.',
+        'market.empty': 'This marketplace lists no installable plugins',
+        'action.install': 'Install',
+        'action.installed': 'Installed',
       },
       zh: {
         'entry.label': '文件插件',
@@ -52,8 +66,9 @@ window.__ModuleLoader__.load({
         'page.reading': '正在读取插件…',
         'page.error': '无法读取插件清单',
         'group.installed': '已安装',
+        'group.markets': '市场',
         'group.empty': '还没有插件',
-        'group.emptyHint': '把 GitHub 或 .zip 链接粘到上面的输入框就能装。',
+        'group.emptyHint': '先添加一个市场，或者把链接粘到上面的输入框。',
         'group.root': '插件目录',
         'row.skills': '个技能',
         'row.agents': '个子代理',
@@ -68,6 +83,19 @@ window.__ModuleLoader__.load({
         'add.ok': '已安装',
         'add.failed': '安装失败',
         'empty.none': '没有匹配的插件',
+        'market.add': '添加市场',
+        'market.addPlaceholder': 'https://github.com/用户/仓库（市场地址）',
+        'market.adding': '正在添加…',
+        'market.refresh': '刷新',
+        'market.refreshing': '正在刷新…',
+        'market.remove': '移除',
+        'market.count': '个插件',
+        'market.failed': '无法读取这个市场',
+        'market.none': '还没有市场',
+        'market.noneHint': '添加一个带 marketplace.json 的 GitHub 仓库。',
+        'market.empty': '这个市场没有可安装的插件',
+        'action.install': '安装',
+        'action.installed': '已安装',
       },
     }
 
@@ -292,6 +320,72 @@ window.__ModuleLoader__.load({
       },
       emptyTitle: { fontWeight: 600 },
       emptyHint: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' },
+
+      // A marketplace is a section with its own heading row, its own action
+      // button, and a list beneath. Sections stack; nothing nests.
+      marketBar: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '14px 0 12px',
+      },
+      marketAdd: {
+        display: 'flex',
+        gap: '8px',
+        margin: '0 0 8px',
+      },
+      marketInput: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        padding: '8px 12px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '13px',
+      },
+      section: { marginTop: '8px' },
+      sectionHead: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '10px',
+        paddingBottom: '8px',
+      },
+      sectionTitle: { fontSize: '14px', fontWeight: 600 },
+      sectionCount: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      sectionActions: { marginLeft: 'auto', display: 'flex', gap: '6px' },
+      ghost: {
+        padding: '3px 10px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '7px',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        font: 'inherit',
+        fontSize: '12px',
+        cursor: 'pointer',
+      },
+      marketError: {
+        margin: '4px 0 0',
+        color: 'var(--dsw-alias-state-warn-primary)',
+        fontSize: '12px',
+      },
+      installChip: (done) => ({
+        padding: '3px 12px',
+        border: '1px solid ' + (done ? 'transparent' : 'var(--dsw-alias-border-l2)'),
+        borderRadius: '7px',
+        background: done ? 'transparent' : 'var(--dsw-alias-bg-layer-2)',
+        color: done ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: done ? 'default' : 'pointer',
+        whiteSpace: 'nowrap',
+      }),
     }
 
     /** A magnifier drawn in one stroke, matching the host's icon weight. */
@@ -419,8 +513,112 @@ window.__ModuleLoader__.load({
       return body
     }
 
+    /**
+     * Read every configured marketplace and its plugins.
+     *
+     * @param {boolean} refresh
+     * @returns {Promise<{ sources: object[] }>}
+     */
+    async function readMarkets(refresh) {
+      const response = await fetch(`/api/plugin-file/markets${refresh ? '?refresh=1' : ''}`, {
+        headers: { accept: 'application/json' },
+        credentials: 'same-origin',
+      })
+      if (!response.ok) {
+        throw new Error(`markets -> ${String(response.status)} ${response.statusText}`)
+      }
+      return response.json()
+    }
+
+    /**
+     * @param {{ action: 'add' | 'remove', url?: string, id?: string }} body
+     * @returns {Promise<{ ok: boolean, source?: object, error?: { code: string, message: string } }>}
+     */
+    async function mutateMarket(body) {
+      const response = await fetch('/api/plugin-file/markets', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body),
+      })
+      return response.json().catch(() => ({
+        ok: false,
+        error: { code: 'bad-response', message: String(response.status) },
+      }))
+    }
+
     /** Bound `t` for this namespace once the locale service is available. */
     let localeService
+
+    /**
+     * One marketplace: its heading, its plugin rows, and its own controls.
+     *
+     * A section rather than a card: the page already has a column, and nesting
+     * a box inside it would add a border that carries no meaning.
+     *
+     * @param {{ source: object, onRemove: (id: string) => void, onInstall: (url: string) => void }} props
+     */
+    function MarketSection({ source, onRemove, onInstall }) {
+      const plugins = source.plugins ?? []
+
+      return h(
+        'div',
+        { style: { marginTop: '14px' } },
+        h(
+          'div',
+          { style: styles.marketBar },
+          h('span', { style: styles.name }, source.source.name),
+          h('span', { style: styles.groupCount }, `${String(plugins.length)} ${translate('market.count')}`),
+          h(
+            'button',
+            {
+              type: 'button',
+              onClick: () => onRemove(source.source.id),
+              style: { ...styles.ghost, marginLeft: 'auto' },
+              title: source.source.id,
+            },
+            translate('market.remove'),
+          ),
+        ),
+        source.error === undefined
+          ? null
+          : h('p', { style: styles.marketError }, `${translate('market.failed')}: ${source.error}`),
+        plugins.length === 0 && source.error === undefined
+          ? h('p', { style: styles.rowMeta }, translate('market.empty'))
+          : h(
+              'ul',
+              { style: styles.list },
+              plugins.map((entry) =>
+                h(
+                  'li',
+                  { key: entry.name, style: styles.row },
+                  h(
+                    'span',
+                    { style: styles.iconFallback, 'aria-hidden': 'true' },
+                    entry.name.slice(0, 1),
+                  ),
+                  h(
+                    'div',
+                    { style: styles.rowText },
+                    h('span', { style: styles.rowName }, entry.name),
+                    h('span', { style: styles.rowDesc }, entry.description ?? entry.installUrl),
+                  ),
+                  entry.installed
+                    ? h('span', { style: styles.installChip(true) }, translate('action.installed'))
+                    : h(
+                        'button',
+                        {
+                          type: 'button',
+                          onClick: () => onInstall(entry.installUrl),
+                          style: styles.installChip(false),
+                        },
+                        translate('action.install'),
+                      ),
+                ),
+              ),
+            ),
+      )
+    }
 
     /**
      * The main-slot page.
@@ -432,6 +630,9 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = React.useState('')
       const [installing, setInstalling] = React.useState(false)
       const [outcome, setOutcome] = React.useState(undefined)
+      const [markets, setMarkets] = React.useState({ status: 'loading' })
+      const [marketDraft, setMarketDraft] = React.useState('')
+      const [addingMarket, setAddingMarket] = React.useState(false)
       const [, bumpLocale] = React.useState(0)
 
       React.useEffect(() => {
@@ -447,6 +648,13 @@ window.__ModuleLoader__.load({
         )
       }, [])
 
+      const loadMarkets = React.useCallback((refresh) => {
+        return readMarkets(refresh).then(
+          (value) => setMarkets({ status: 'ready', value }),
+          (error) => setMarkets({ status: 'error', error }),
+        )
+      }, [])
+
       React.useEffect(() => {
         let alive = true
         readInventory().then(
@@ -455,6 +663,24 @@ window.__ModuleLoader__.load({
           },
           (error) => {
             if (alive) setState({ status: 'error', error })
+          },
+        )
+        return () => {
+          alive = false
+        }
+      }, [])
+
+      // Marketplaces are read once on mount and again on demand: the list is
+      // remote content, so refreshing it silently on a timer would spend the
+      // user's network without telling them.
+      React.useEffect(() => {
+        let alive = true
+        readMarkets(false).then(
+          (value) => {
+            if (alive) setMarkets({ status: 'ready', value })
+          },
+          (error) => {
+            if (alive) setMarkets({ status: 'error', error })
           },
         )
         return () => {
@@ -487,6 +713,61 @@ window.__ModuleLoader__.load({
           }
         },
         [draft, installing, load],
+      )
+
+      const submitMarket = React.useCallback(
+        async (event) => {
+          event.preventDefault()
+          const url = marketDraft.trim()
+          if (url === '' || addingMarket) return
+
+          setAddingMarket(true)
+          setOutcome(undefined)
+          try {
+            const result = await mutateMarket({ action: 'add', url })
+            if (result.ok) {
+              setMarketDraft('')
+              await loadMarkets(true)
+            } else {
+              setOutcome({ ok: false, error: result.error })
+            }
+          } catch (error) {
+            setOutcome({ ok: false, error: { code: 'network', message: String(error) } })
+          } finally {
+            setAddingMarket(false)
+          }
+        },
+        [marketDraft, addingMarket, loadMarkets],
+      )
+
+      const removeMarket = React.useCallback(
+        async (id) => {
+          await mutateMarket({ action: 'remove', id }).catch(() => undefined)
+          await loadMarkets(false)
+        },
+        [loadMarkets],
+      )
+
+      const refreshMarkets = React.useCallback(() => {
+        setMarkets({ status: 'loading' })
+        void loadMarkets(true)
+      }, [loadMarkets])
+
+      const installFromMarket = React.useCallback(
+        async (url) => {
+          setOutcome(undefined)
+          try {
+            const result = await installPlugin(url)
+            setOutcome(result)
+            if (result.ok) {
+              load()
+              await loadMarkets(false)
+            }
+          } catch (error) {
+            setOutcome({ ok: false, error: { code: 'network', message: String(error) } })
+          }
+        },
+        [load, loadMarkets],
       )
 
       if (state.status === 'loading') {
@@ -624,6 +905,79 @@ window.__ModuleLoader__.load({
                   ? `${translate('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${translate('row.skills')} · ${String(outcome.agents ?? 0)} ${translate('row.agents')}`
                   : `${translate('add.failed')}: ${outcome.error?.message ?? ''}`,
               ),
+
+          h(
+            'section',
+            { style: styles.section },
+            h(
+              'div',
+              { style: styles.sectionHead },
+              h('span', { style: styles.sectionTitle }, translate('group.markets')),
+              h(
+                'span',
+                { style: styles.sectionCount },
+                markets.status === 'ready' ? String(markets.value.sources.length) : '',
+              ),
+              h(
+                'div',
+                { style: styles.sectionActions },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: refreshMarkets,
+                    disabled: markets.status === 'loading',
+                    style: styles.ghost,
+                  },
+                  markets.status === 'loading' ? translate('market.refreshing') : translate('market.refresh'),
+                ),
+              ),
+            ),
+
+            h(
+              'form',
+              { style: styles.marketAdd, onSubmit: submitMarket },
+              h('input', {
+                type: 'url',
+                value: marketDraft,
+                onChange: (event) => setMarketDraft(event.target.value),
+                placeholder: translate('market.addPlaceholder'),
+                spellCheck: false,
+                disabled: addingMarket,
+                'aria-label': translate('market.addPlaceholder'),
+                style: styles.marketInput,
+              }),
+              h(
+                'button',
+                {
+                  type: 'submit',
+                  disabled: addingMarket || marketDraft.trim() === '',
+                  style: styles.primary(!addingMarket && marketDraft.trim() !== ''),
+                },
+                addingMarket ? translate('market.adding') : translate('market.add'),
+              ),
+            ),
+
+            markets.status === 'error'
+              ? h('p', { style: styles.marketError }, `${translate('market.failed')}: ${String(markets.error)}`)
+              : markets.status === 'loading'
+                ? h('p', { style: styles.rowMeta }, translate('page.reading'))
+                : markets.value.sources.length === 0
+                  ? h(
+                      'div',
+                      { style: styles.empty },
+                      h('span', { style: styles.emptyTitle }, translate('market.none')),
+                      h('span', { style: styles.emptyHint }, translate('market.noneHint')),
+                    )
+                  : markets.value.sources.map((source) =>
+                      h(MarketSection, {
+                        key: source.source.id,
+                        source,
+                        onRemove: removeMarket,
+                        onInstall: installFromMarket,
+                      }),
+                    ),
+          ),
 
           h(
             'section',

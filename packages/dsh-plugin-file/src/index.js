@@ -22,6 +22,7 @@ import { join, resolve } from 'node:path'
 
 import { discoverPlugins } from './discover.js'
 import { installFromUrl } from './install.js'
+import { MarketplaceStore } from './market.js'
 import { parseMarkdown } from './parse.js'
 
 export const name = 'plugin-file'
@@ -49,6 +50,8 @@ const DEFAULTS = {
  * @returns {{ inventory: () => Promise<object> }}
  */
 function inventoryService(loader) {
+  const markets = new MarketplaceStore(loader.root)
+
   return {
     /**
      * Re-read the plugin root and describe every plugin it holds.
@@ -81,6 +84,43 @@ function inventoryService(loader) {
         loader.invalidate()
       }
       return result
+    },
+
+    /**
+     * Every configured marketplace with its plugins, marking what is already
+     * installed so the panel can show state without a second request.
+     *
+     * @param {{ refresh?: boolean }} [options]
+     * @returns {Promise<{ sources: object[] }>}
+     */
+    async markets(options = {}) {
+      const snapshots = await markets.snapshots(options)
+      const installed = new Set(loader.inventory().map((plugin) => plugin.name))
+
+      return {
+        sources: snapshots.map((snapshot) => ({
+          ...snapshot,
+          plugins: snapshot.plugins.map((entry) => ({
+            ...entry,
+            installed: installed.has(entry.name),
+          })),
+        })),
+      }
+    },
+
+    /**
+     * @param {string} url
+     */
+    async addMarket(url) {
+      return markets.add(url)
+    },
+
+    /**
+     * @param {string} id
+     */
+    async removeMarket(id) {
+      const removed = await markets.remove(id)
+      return { ok: removed }
     },
   }
 }
@@ -237,8 +277,7 @@ function registerInventoryRoute(ctx, inventory) {
       path: '/api/plugin-file/install',
       handler: async (req, res) => {
         if (req.method !== 'POST') {
-          res.writeHead(405, { allow: 'POST', 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: { code: 'method', message: 'use POST' } }))
+          sendJson(res, 405, { ok: false, error: { code: 'method', message: 'use POST' } }, { allow: 'POST' })
           return
         }
 
@@ -247,28 +286,95 @@ function registerInventoryRoute(ctx, inventory) {
           const body = await readJsonBody(req)
           url = typeof body?.url === 'string' ? body.url : ''
         } catch (error) {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: { code: 'invalid-body', message: describe(error) } }))
+          sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: describe(error) } })
           return
         }
 
         if (url === '') {
-          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ ok: false, error: { code: 'invalid-body', message: 'url is required' } }))
+          sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: 'url is required' } })
           return
         }
 
         const result = await inventory.install(url)
-        res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8' })
-        res.end(JSON.stringify(result))
+        sendJson(res, result.ok ? 200 : 400, result)
+      },
+    })
+
+    // Marketplaces: one GET for the whole picture, and one POST whose `action`
+    // selects the mutation. Two verbs keep the route table small.
+    const disposeMarkets = webServer.register({
+      kind: 'exact',
+      path: '/api/plugin-file/markets',
+      handler: async (req, res) => {
+        if (req.method === 'GET') {
+          const url = new URL(req.url ?? '/', 'http://localhost')
+          const refresh = url.searchParams.get('refresh') === '1'
+          try {
+            sendJson(res, 200, await inventory.markets({ refresh }))
+          } catch (error) {
+            sendJson(res, 500, { error: describe(error) })
+          }
+          return
+        }
+
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { ok: false, error: { code: 'method', message: 'use GET or POST' } }, { allow: 'GET, POST' })
+          return
+        }
+
+        let body
+        try {
+          body = await readJsonBody(req)
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: describe(error) } })
+          return
+        }
+
+        const action = typeof body?.action === 'string' ? body.action : ''
+        if (action === 'add') {
+          const url = typeof body?.url === 'string' ? body.url : ''
+          if (url === '') {
+            sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: 'url is required' } })
+            return
+          }
+          const result = await inventory.addMarket(url)
+          sendJson(res, result.ok ? 200 : 400, result)
+          return
+        }
+
+        if (action === 'remove') {
+          const id = typeof body?.id === 'string' ? body.id : ''
+          if (id === '') {
+            sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: 'id is required' } })
+            return
+          }
+          sendJson(res, 200, await inventory.removeMarket(id))
+          return
+        }
+
+        sendJson(res, 400, { ok: false, error: { code: 'invalid-action', message: 'action must be add or remove' } })
       },
     })
 
     inner.effect(() => disposeGet, 'plugin-file inventory route')
     inner.effect(() => disposeIcon, 'plugin-file icon route')
     inner.effect(() => disposePost, 'plugin-file install route')
-    ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,icon,install}')
+    inner.effect(() => disposeMarkets, 'plugin-file markets route')
+    ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,icon,install,markets}')
   })
+}
+
+/**
+ * Write one JSON response.
+ *
+ * @param {import('node:http').ServerResponse} res
+ * @param {number} status
+ * @param {unknown} body
+ * @param {Record<string, string>} [headers]
+ */
+function sendJson(res, status, body, headers = {}) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...headers })
+  res.end(JSON.stringify(body))
 }
 
 /**
