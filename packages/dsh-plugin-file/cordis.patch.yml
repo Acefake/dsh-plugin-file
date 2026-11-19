@@ -1,0 +1,8 @@
+# dsh-plugin-file bundle patch: inserts the loader row into the profile roster.
+#
+# The loader scans ~/.dsh/plugins/<name>/ for directories carrying a
+# plugin.json and turns their Markdown and JSON into skill, agent-preset, and
+# hook registrations. It needs `ctx.skills`, which the standard preset mounts.
+- insert:
+    - id: plugin-file
+      name: dsh-plugin-file

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="File plugins">
+  <!-- A folder holding a document: one directory of Markdown becomes a plugin. -->
+  <defs>
+    <linearGradient id="folder" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4C8DFF"/>
+      <stop offset="1" stop-color="#2F6BE0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#101827"/>
+  <path d="M12 20a4 4 0 0 1 4-4h9l4 5h19a4 4 0 0 1 4 4v23a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" fill="url(#folder)"/>
+  <rect x="25" y="24" width="20" height="24" rx="3" fill="#F4F7FF"/>
+  <g fill="#2F6BE0">
+    <rect x="29" y="29" width="12" height="2.4" rx="1.2"/>
+    <rect x="29" y="34" width="12" height="2.4" rx="1.2"/>
+    <rect x="29" y="39" width="8" height="2.4" rx="1.2"/>
+  </g>
+</svg>

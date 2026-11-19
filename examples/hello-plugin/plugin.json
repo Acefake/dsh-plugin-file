@@ -1,0 +1,5 @@
+{
+  "name": "hello-plugin",
+  "description": "A worked example of a file plugin: one skill, one command, one subagent.",
+  "version": "0.1.0"
+}

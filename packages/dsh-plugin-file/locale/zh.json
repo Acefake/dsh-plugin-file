@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "文件插件",
+    "description": "把一个 Markdown 和 JSON 目录当插件加载：技能、斜杠命令、子代理和 Claude Code 钩子，不用写 TypeScript。",
+    "detail": "docs/DETAIL.md"
+  }
+}

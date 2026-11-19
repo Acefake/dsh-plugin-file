@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "title": {
+    "en": "File plugins",
+    "zh": "文件插件"
+  },
+  "description": {
+    "en": "Plugins you write as Markdown and JSON instead of TypeScript.",
+    "zh": "用 Markdown 和 JSON 写的插件，不用写 TypeScript。"
+  },
+  "metadata": {
+    "categories": {
+      "skill": {
+        "title": {
+          "en": "Skills",
+          "zh": "技能包"
+        }
+      },
+      "tools": {
+        "title": {
+          "en": "Tools & Capabilities",
+          "zh": "工具与能力"
+        }
+      }
+    },
+    "labels": {
+      "no-build": {
+        "title": {
+          "en": "No build step",
+          "zh": "无需构建"
+        }
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-plugin-file",
+      "title": {
+        "en": "File plugins",
+        "zh": "文件插件"
+      },
+      "description": {
+        "en": "Load a directory of Markdown and JSON as a plugin: skills, slash commands, subagents and Claude Code hooks, without writing TypeScript.",
+        "zh": "把一个 Markdown 和 JSON 目录当插件加载：技能、斜杠命令、子代理和 Claude Code 钩子，不用写 TypeScript。"
+      },
+      "author": "dsh-plugin-file",
+      "repository": {
+        "url": "https://github.com/dsh-plugin-file/dsh-plugin-file",
+        "directory": "packages/dsh-plugin-file"
+      },
+      "metadata": {
+        "category": "skill",
+        "labels": ["no-build"],
+        "keywords": ["skills", "commands", "agents", "hooks", "claude-code", "file-plugin"]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794937800,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/dsh-plugin-file/dsh-plugin-file",
+            "commit": "0000000000000000000000000000000000000000",
+            "path": "packages/dsh-plugin-file"
+          }
+        }
+      ]
+    }
+  ]
+}

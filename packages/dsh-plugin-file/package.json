@@ -1,0 +1,39 @@
+{
+  "name": "dsh-plugin-file",
+  "version": "0.1.0",
+  "description": "Load a directory of Markdown and JSON as a DeepSeek Harness plugin — Claude Code–style file plugins without TypeScript.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "plugin",
+    "skills",
+    "claude-code"
+  ],
+  "main": "src/index.js",
+  "icon": "icon.svg",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "src",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "icon.svg",
+    "docs"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

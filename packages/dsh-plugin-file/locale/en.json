@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "File plugins",
+    "description": "Load a directory of Markdown and JSON as a plugin: skills, slash commands, subagents and Claude Code hooks, without writing TypeScript.",
+    "detail": "docs/DETAIL.md"
+  }
+}
