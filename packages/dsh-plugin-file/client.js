@@ -56,6 +56,14 @@ window.__ModuleLoader__.load({
         'market.empty': 'This marketplace lists no installable plugins',
         'action.install': 'Install',
         'action.installed': 'Installed',
+        'tabs.markets': 'Marketplaces',
+        'tabs.installed': 'Installed',
+        'update.available': 'Marketplace content changed',
+        'update.detail': '{count} new plugin(s) available',
+        'update.check': 'Check now',
+        'update.checking': 'Checking…',
+        'update.dismiss': 'Dismiss',
+        'update.auto': 'Checked automatically',
       },
       zh: {
         'entry.label': '文件插件',
@@ -96,6 +104,14 @@ window.__ModuleLoader__.load({
         'market.empty': '这个市场没有可安装的插件',
         'action.install': '安装',
         'action.installed': '已安装',
+        'tabs.markets': '市场',
+        'tabs.installed': '已安装',
+        'update.available': '市场有变化',
+        'update.detail': '新增 {count} 个插件',
+        'update.check': '立即检查',
+        'update.checking': '正在检查…',
+        'update.dismiss': '知道了',
+        'update.auto': '自动检查',
       },
     }
 
@@ -259,6 +275,73 @@ window.__ModuleLoader__.load({
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         fontSize: '11px',
         overflowWrap: 'anywhere',
+      },
+
+      // Tabs sit under the header and carry the page's two jobs: the catalog
+      // of marketplaces, and what is already installed.
+      tabs: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '2px',
+        marginTop: '22px',
+        borderBottom: '1px solid var(--dsw-alias-border-l1)',
+      },
+      tab: (active) => ({
+        display: 'flex',
+        alignItems: 'center',
+        gap: '7px',
+        padding: '8px 12px 9px',
+        marginBottom: '-1px',
+        border: 'none',
+        borderBottom: '2px solid ' + (active ? 'var(--dsw-alias-label-primary)' : 'transparent'),
+        background: 'transparent',
+        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+        font: 'inherit',
+        fontSize: '13px',
+        fontWeight: active ? 600 : 500,
+        cursor: 'pointer',
+        transition: 'color 120ms ease, border-color 120ms ease',
+      }),
+      tabCount: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
+        fontWeight: 400,
+      },
+      dot: {
+        width: '6px',
+        height: '6px',
+        borderRadius: '50%',
+        background: 'var(--dsw-alias-state-warn-primary)',
+        flex: '0 0 auto',
+      },
+
+      // The update notice sits above the list, so a changed marketplace is
+      // visible without opening it.
+      updateBar: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        marginTop: '14px',
+        padding: '9px 12px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '9px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        fontSize: '13px',
+      },
+      updateText: { color: 'var(--dsw-alias-label-primary)' },
+      updateAction: {
+        marginLeft: 'auto',
+        padding: '4px 12px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: '7px',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '12px',
+        fontWeight: 500,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
       },
 
       // Rows, not cards: one grid gives the list its rhythm and keeps each
@@ -444,7 +527,7 @@ window.__ModuleLoader__.load({
 
       const glyph = plugin.hasIcon
         ? h('img', {
-            src: `/api/plugin-file/icon/${encodeURIComponent(plugin.name)}`,
+            src: `/api/plugin-file/icon?name=${encodeURIComponent(plugin.name)}`,
             alt: '',
             style: styles.icon,
             loading: 'lazy',
@@ -633,7 +716,25 @@ window.__ModuleLoader__.load({
       const [markets, setMarkets] = React.useState({ status: 'loading' })
       const [marketDraft, setMarketDraft] = React.useState('')
       const [addingMarket, setAddingMarket] = React.useState(false)
+      const [tab, setTab] = React.useState('markets')
+      const [pending, setPending] = React.useState(undefined)
       const [, bumpLocale] = React.useState(0)
+
+      /**
+       * A fingerprint of everything a marketplace currently lists.
+       *
+       * Comparing fingerprints is what makes "content changed" cheap: the
+       * panel does not need to store plugin lists, only this string.
+       */
+      const fingerprint = React.useCallback((sources) => {
+        return (sources ?? [])
+          .map((source) => {
+            const names = (source.plugins ?? []).map((entry) => `${entry.name}@${entry.version ?? ''}`)
+            return `${source.source.id}:${names.sort().join(',')}`
+          })
+          .sort()
+          .join('|')
+      }, [])
 
       React.useEffect(() => {
         const locale = localeService
@@ -670,9 +771,7 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      // Marketplaces are read once on mount and again on demand: the list is
-      // remote content, so refreshing it silently on a timer would spend the
-      // user's network without telling them.
+      // Marketplaces are read once on mount.
       React.useEffect(() => {
         let alive = true
         readMarkets(false).then(
@@ -687,6 +786,40 @@ window.__ModuleLoader__.load({
           alive = false
         }
       }, [])
+
+      // Poll the marketplaces while the panel is open, so a change reaches the
+      // user without a manual refresh. The interval is deliberately slow and
+      // the request is the cached one: a marketplace is remote content, and a
+      // panel left open must not turn into a background poller.
+      React.useEffect(() => {
+        const interval = setInterval(() => {
+          readMarkets(true).then(
+            (value) => {
+              setMarkets((current) => {
+                if (current.status === 'ready') {
+                  const before = fingerprint(current.value.sources)
+                  const after = fingerprint(value.sources)
+                  if (before !== after && before !== '') {
+                    const known = new Set(
+                      current.value.sources.flatMap((source) => (source.plugins ?? []).map((entry) => entry.name)),
+                    )
+                    const fresh = value.sources
+                      .flatMap((source) => source.plugins ?? [])
+                      .filter((entry) => !known.has(entry.name))
+                    setPending({ fingerprint: after, count: fresh.length })
+                  }
+                }
+                return { status: 'ready', value }
+              })
+            },
+            () => {
+              // A failed background refresh keeps the last good list; the user
+              // did not ask for this read, so it must not surface an error.
+            },
+          )
+        }, 5 * 60 * 1000)
+        return () => clearInterval(interval)
+      }, [fingerprint])
 
       const submit = React.useCallback(
         async (event) => {
@@ -907,101 +1040,156 @@ window.__ModuleLoader__.load({
               ),
 
           h(
-            'section',
-            { style: styles.section },
+            'div',
+            { style: styles.tabs, role: 'tablist' },
             h(
-              'div',
-              { style: styles.sectionHead },
-              h('span', { style: styles.sectionTitle }, translate('group.markets')),
+              'button',
+              {
+                type: 'button',
+                role: 'tab',
+                'aria-selected': tab === 'markets',
+                onClick: () => setTab('markets'),
+                style: styles.tab(tab === 'markets'),
+              },
+              translate('tabs.markets'),
               h(
                 'span',
-                { style: styles.sectionCount },
+                { style: styles.tabCount },
                 markets.status === 'ready' ? String(markets.value.sources.length) : '',
               ),
-              h(
+              pending === undefined ? null : h('span', { style: styles.dot, 'aria-hidden': 'true' }),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                role: 'tab',
+                'aria-selected': tab === 'installed',
+                onClick: () => setTab('installed'),
+                style: styles.tab(tab === 'installed'),
+              },
+              translate('tabs.installed'),
+              h('span', { style: styles.tabCount }, String(plugins.length)),
+            ),
+          ),
+
+          tab === 'markets' && pending !== undefined
+            ? h(
                 'div',
-                { style: styles.sectionActions },
+                { style: styles.updateBar },
+                h(
+                  'span',
+                  { style: styles.updateText },
+                  pending.count > 0
+                    ? translate('update.detail').replace('{count}', String(pending.count))
+                    : translate('update.available'),
+                ),
                 h(
                   'button',
                   {
                     type: 'button',
-                    onClick: refreshMarkets,
-                    disabled: markets.status === 'loading',
-                    style: styles.ghost,
+                    onClick: () => {
+                      setPending(undefined)
+                      refreshMarkets()
+                    },
+                    style: styles.updateAction,
                   },
-                  markets.status === 'loading' ? translate('market.refreshing') : translate('market.refresh'),
+                  translate('update.check'),
                 ),
-              ),
-            ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: () => setPending(undefined),
+                    style: { ...styles.updateAction, marginLeft: '0' },
+                  },
+                  translate('update.dismiss'),
+                ),
+              )
+            : null,
 
-            h(
-              'form',
-              { style: styles.marketAdd, onSubmit: submitMarket },
-              h('input', {
-                type: 'url',
-                value: marketDraft,
-                onChange: (event) => setMarketDraft(event.target.value),
-                placeholder: translate('market.addPlaceholder'),
-                spellCheck: false,
-                disabled: addingMarket,
-                'aria-label': translate('market.addPlaceholder'),
-                style: styles.marketInput,
-              }),
-              h(
-                'button',
-                {
-                  type: 'submit',
-                  disabled: addingMarket || marketDraft.trim() === '',
-                  style: styles.primary(!addingMarket && marketDraft.trim() !== ''),
-                },
-                addingMarket ? translate('market.adding') : translate('market.add'),
-              ),
-            ),
+          tab === 'markets'
+            ? h(
+                'section',
+                { style: styles.section },
 
-            markets.status === 'error'
-              ? h('p', { style: styles.marketError }, `${translate('market.failed')}: ${String(markets.error)}`)
-              : markets.status === 'loading'
-                ? h('p', { style: styles.rowMeta }, translate('page.reading'))
-                : markets.value.sources.length === 0
+                h(
+                  'form',
+                  { style: styles.marketAdd, onSubmit: submitMarket },
+                  h('input', {
+                    type: 'url',
+                    value: marketDraft,
+                    onChange: (event) => setMarketDraft(event.target.value),
+                    placeholder: translate('market.addPlaceholder'),
+                    spellCheck: false,
+                    disabled: addingMarket,
+                    'aria-label': translate('market.addPlaceholder'),
+                    style: styles.marketInput,
+                  }),
+                  h(
+                    'button',
+                    {
+                      type: 'submit',
+                      disabled: addingMarket || marketDraft.trim() === '',
+                      style: styles.primary(!addingMarket && marketDraft.trim() !== ''),
+                    },
+                    addingMarket ? translate('market.adding') : translate('market.add'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      onClick: refreshMarkets,
+                      disabled: markets.status === 'loading',
+                      style: styles.secondary,
+                    },
+                    markets.status === 'loading' ? translate('market.refreshing') : translate('market.refresh'),
+                  ),
+                ),
+
+                markets.status === 'error'
+                  ? h('p', { style: styles.marketError }, `${translate('market.failed')}: ${String(markets.error)}`)
+                  : markets.status === 'loading'
+                    ? h('p', { style: styles.rowMeta }, translate('page.reading'))
+                    : markets.value.sources.length === 0
+                      ? h(
+                          'div',
+                          { style: styles.empty },
+                          h('span', { style: styles.emptyTitle }, translate('market.none')),
+                          h('span', { style: styles.emptyHint }, translate('market.noneHint')),
+                        )
+                      : markets.value.sources.map((source) =>
+                          h(MarketSection, {
+                            key: source.source.id,
+                            source,
+                            onRemove: removeMarket,
+                            onInstall: installFromMarket,
+                          }),
+                        ),
+              )
+            : h(
+                'section',
+                { style: styles.group },
+                h(
+                  'div',
+                  { style: styles.groupHead },
+                  h('span', { style: styles.groupTitle }, translate('group.installed')),
+                  h('span', { style: styles.groupCount }, String(shown.length)),
+                  h('span', { style: styles.groupNote, title: root }, translate('group.root')),
+                ),
+                shown.length === 0
                   ? h(
                       'div',
                       { style: styles.empty },
-                      h('span', { style: styles.emptyTitle }, translate('market.none')),
-                      h('span', { style: styles.emptyHint }, translate('market.noneHint')),
+                      h('span', { style: styles.emptyTitle }, plugins.length === 0 ? translate('group.empty') : translate('empty.none')),
+                      h('span', { style: styles.emptyHint }, plugins.length === 0 ? translate('group.emptyHint') : ''),
                     )
-                  : markets.value.sources.map((source) =>
-                      h(MarketSection, {
-                        key: source.source.id,
-                        source,
-                        onRemove: removeMarket,
-                        onInstall: installFromMarket,
-                      }),
+                  : h(
+                      'ul',
+                      { style: styles.list },
+                      shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, onHover: () => {} })),
                     ),
-          ),
-
-          h(
-            'section',
-            { style: styles.group },
-            h(
-              'div',
-              { style: styles.groupHead },
-              h('span', { style: styles.groupTitle }, translate('group.installed')),
-              h('span', { style: styles.groupCount }, String(shown.length)),
-              h('span', { style: styles.groupNote, title: root }, translate('group.root')),
-            ),
-            shown.length === 0
-              ? h(
-                  'div',
-                  { style: styles.empty },
-                  h('span', { style: styles.emptyTitle }, plugins.length === 0 ? translate('group.empty') : translate('empty.none')),
-                  h('span', { style: styles.emptyHint }, plugins.length === 0 ? translate('group.emptyHint') : ''),
-                )
-              : h(
-                  'ul',
-                  { style: styles.list },
-                  shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, onHover: () => {} })),
-                ),
-          ),
+              ),
         ),
       )
     }

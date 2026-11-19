@@ -248,15 +248,16 @@ function registerInventoryRoute(ctx, inventory) {
       },
     })
 
-    // Icons are served separately so the inventory payload stays small and a
-    // plugin without one costs nothing. The path is a query rather than a
-    // route parameter: the carrier accepts exact paths only.
+    // An `exact` route with the plugin name as a query parameter, not a
+    // `prefix` route with a path segment: only exact routes reach a resource
+    // unauthenticated here, and a prefix route answered 401 while every exact
+    // sibling answered 200.
     const disposeIcon = webServer.register({
-      kind: 'prefix',
-      path: '/api/plugin-file/icon/',
+      kind: 'exact',
+      path: '/api/plugin-file/icon',
       resource: async (request) => {
-        const name = new URL(request.url).pathname.slice('/api/plugin-file/icon/'.length)
-        const found = await inventory.icon(decodeURIComponent(name))
+        const name = new URL(request.url).searchParams.get('name') ?? ''
+        const found = await inventory.icon(name)
         if (found === undefined) return new Response('not found', { status: 404 })
         return new Response(found.body, {
           headers: {
