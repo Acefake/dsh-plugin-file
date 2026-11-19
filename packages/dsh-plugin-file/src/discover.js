@@ -140,8 +140,26 @@ async function readPlugin(dir, dirName, manifestPath, report) {
   ]
   const agents = await collectMarkdown(join(dir, manifest.agents), dirName, 'agent', report)
   const hooksPath = await existingFile(join(dir, manifest.hooks))
+  const iconPath = await findIcon(dir)
 
-  return { name: manifest.name, dir, manifest, skills, agents, hooksPath }
+  return { name: manifest.name, dir, manifest, skills, agents, hooksPath, iconPath }
+}
+
+/** Icon file names accepted at a plugin root, in preference order. */
+const ICON_CANDIDATES = ['icon.svg', 'icon.png', 'icon.webp', 'icon.jpg', 'icon.jpeg']
+
+/**
+ * Find a plugin's icon, if it ships one.
+ *
+ * @param {string} dir
+ * @returns {Promise<string | undefined>}
+ */
+async function findIcon(dir) {
+  for (const candidate of ICON_CANDIDATES) {
+    const path = join(dir, candidate)
+    if (await existingFile(path)) return path
+  }
+  return undefined
 }
 
 /**

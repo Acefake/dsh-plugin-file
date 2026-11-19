@@ -297,7 +297,7 @@ test('the inventory route answers with the same service value', async () => {
   })
 })
 
-test('the install route refuses everything but a POST with a url', async () => {
+test('the install route is a handler that refuses everything but POST', async () => {
   await withRoot(async (root) => {
     await write(root, 'demo/plugin.json', '{}')
 
@@ -313,24 +313,61 @@ test('the install route refuses everything but a POST with a url', async () => {
     apply(ctx, { pluginRoot: root, watch: false })
     const install = routes.find((route) => route.path === '/api/plugin-file/install')
 
-    const get = await install.resource(new Request('http://x/api/plugin-file/install', { method: 'GET' }))
-    assert.equal(get.status, 405)
+    // A resource route answers 405 to every non-GET method before its body is
+    // read, which is why this operation had to become a handler.
+    assert.equal(typeof install.handler, 'function')
+    assert.equal(install.resource, undefined)
 
-    const empty = await install.resource(
-      new Request('http://x/api/plugin-file/install', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
-      }),
-    )
+    const rejected = await callHandler(install.handler, { method: 'GET', body: '' })
+    assert.equal(rejected.status, 405)
+    assert.equal(rejected.headers.allow, 'POST')
+
+    const empty = await callHandler(install.handler, { method: 'POST', body: '{}' })
     assert.equal(empty.status, 400)
+    assert.equal(empty.json.error.code, 'invalid-body')
 
-    const malformed = await install.resource(
-      new Request('http://x/api/plugin-file/install', { method: 'POST', body: 'not json' }),
-    )
+    const malformed = await callHandler(install.handler, { method: 'POST', body: 'not json' })
     assert.equal(malformed.status, 400)
   })
 })
+
+/**
+ * Drive a handler route with a fake request and response.
+ *
+ * @param {(req: any, res: any) => Promise<void>} handler
+ * @param {{ method: string, body: string }} input
+ */
+async function callHandler(handler, input) {
+  const chunks = input.body === '' ? [] : [Buffer.from(input.body, 'utf8')]
+  const req = {
+    method: input.method,
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk
+    },
+  }
+
+  /** @type {{ status?: number, headers?: Record<string, string>, body: string }} */
+  const seen = { body: '' }
+  const res = {
+    writeHead(status, headers) {
+      seen.status = status
+      seen.headers = headers
+      return res
+    },
+    end(body) {
+      seen.body = typeof body === 'string' ? body : ''
+      return res
+    },
+  }
+
+  await handler(req, res)
+
+  return {
+    status: seen.status,
+    headers: seen.headers ?? {},
+    json: seen.body === '' ? undefined : JSON.parse(seen.body),
+  }
+}
 
 test('a preset registry that throws does not remove the skill catalog', async () => {
   await withRoot(async (root) => {

@@ -208,34 +208,89 @@ function registerInventoryRoute(ctx, inventory) {
       },
     })
 
+    // Icons are served separately so the inventory payload stays small and a
+    // plugin without one costs nothing. The path is a query rather than a
+    // route parameter: the carrier accepts exact paths only.
+    const disposeIcon = webServer.register({
+      kind: 'prefix',
+      path: '/api/plugin-file/icon/',
+      resource: async (request) => {
+        const name = new URL(request.url).pathname.slice('/api/plugin-file/icon/'.length)
+        const found = await inventory.icon(decodeURIComponent(name))
+        if (found === undefined) return new Response('not found', { status: 404 })
+        return new Response(found.body, {
+          headers: {
+            'content-type': found.type,
+            'cache-control': 'no-cache',
+            'content-security-policy': "default-src 'none'",
+            'x-content-type-options': 'nosniff',
+          },
+        })
+      },
+    })
+
+    // A `resource` route answers 405 to anything but GET and HEAD, so the
+    // install operation needs a `handler`: the carrier hands it the raw
+    // request and response, and reading the body is the handler's job.
     const disposePost = webServer.register({
       kind: 'exact',
       path: '/api/plugin-file/install',
-      // A POST route: the installer mutates the plugin root, so it must not be
-      // reachable by a plain navigation or a prefetch.
-      resource: async (request) => {
-        if (request.method !== 'POST') {
-          return new Response('method not allowed', { status: 405, headers: { allow: 'POST' } })
+      handler: async (req, res) => {
+        if (req.method !== 'POST') {
+          res.writeHead(405, { allow: 'POST', 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, error: { code: 'method', message: 'use POST' } }))
+          return
         }
-        let url
+
+        let url = ''
         try {
-          const body = await request.json()
+          const body = await readJsonBody(req)
           url = typeof body?.url === 'string' ? body.url : ''
-        } catch {
-          return Response.json({ ok: false, error: { code: 'invalid-body', message: 'expected { url }' } }, { status: 400 })
+        } catch (error) {
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, error: { code: 'invalid-body', message: describe(error) } }))
+          return
         }
+
         if (url === '') {
-          return Response.json({ ok: false, error: { code: 'invalid-body', message: 'url is required' } }, { status: 400 })
+          res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ ok: false, error: { code: 'invalid-body', message: 'url is required' } }))
+          return
         }
+
         const result = await inventory.install(url)
-        return Response.json(result, { status: result.ok ? 200 : 400 })
+        res.writeHead(result.ok ? 200 : 400, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify(result))
       },
     })
 
     inner.effect(() => disposeGet, 'plugin-file inventory route')
+    inner.effect(() => disposeIcon, 'plugin-file icon route')
     inner.effect(() => disposePost, 'plugin-file install route')
-    ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,install}')
+    ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,icon,install}')
   })
+}
+
+/**
+ * Read and parse a small JSON request body.
+ *
+ * Bounded on purpose: the only body this route accepts is `{ url }`, so a
+ * larger payload is a mistake or an attack, not a use case.
+ *
+ * @param {import('node:http').IncomingMessage} req
+ * @returns {Promise<any>}
+ */
+async function readJsonBody(req) {
+  const chunks = []
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.length
+    if (size > 16 * 1024) throw new Error('request body is too large')
+    chunks.push(chunk)
+  }
+  const text = Buffer.concat(chunks).toString('utf8')
+  if (text.trim() === '') return {}
+  return JSON.parse(text)
 }
 
 /**
@@ -382,9 +437,35 @@ class FilePluginLoader {
         skills: plugin.skills.length,
         agents: plugin.agents.length,
         hasHooks: plugin.hooksPath !== undefined,
+        hasIcon: plugin.iconPath !== undefined,
         skillsNamed: plugin.skills.map((entry) => entry.name),
         agentsNamed: plugin.agents.map((entry) => entry.name),
       }))
+  }
+
+  /**
+   * Read one plugin's icon bytes, for the panel to draw.
+   *
+   * @param {string} name
+   * @returns {Promise<{ body: Buffer, type: string } | undefined>}
+   */
+  async icon(name) {
+    const plugin = this.#plugins.get(name)
+    if (plugin?.iconPath === undefined) return undefined
+
+    const body = await readFile(plugin.iconPath).catch(() => undefined)
+    if (body === undefined) return undefined
+
+    const extension = plugin.iconPath.slice(plugin.iconPath.lastIndexOf('.')).toLowerCase()
+    const type =
+      extension === '.svg'
+        ? 'image/svg+xml'
+        : extension === '.png'
+          ? 'image/png'
+          : extension === '.webp'
+            ? 'image/webp'
+            : 'image/jpeg'
+    return { body, type }
   }
 
   /**

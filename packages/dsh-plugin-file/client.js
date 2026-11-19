@@ -1,10 +1,9 @@
 /**
  * Browser half of dsh-plugin-file.
  *
- * Contributes one sidebar panel entry and the page it selects. The page reads
- * the Host inventory over a read-only route the Host half registers. Both slot
- * registrations are wrapped in `ctx.slots.inject` so a shell that does not
- * declare the seat leaves the panel absent instead of failing boot.
+ * Contributes one sidebar panel entry and the page it selects. The page mirrors
+ * the shape of the host's own connector page: a header with search and an
+ * install action, then grouped rows of installed plugins.
  */
 
 window.__ModuleLoader__.load({
@@ -17,62 +16,303 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'file-plugins'
     const PANEL_ORDER = 30
 
-    /**
-     * Text for both baseline locales.
-     *
-     * Registered through the Client locale service rather than branched in the
-     * component: a hardcoded language would ignore the user's choice, and the
-     * service already carries the active-locale subscription.
-     */
     const TEXTS = {
       en: {
         'entry.label': 'File plugins',
-        'page.title': 'File plugins',
-        'page.subtitle':
-          'Drop a directory with a plugin.json into plugins. Skills and commands appear in the / menu; agents appear as presets.',
+        'page.title': 'Plugins',
+        'page.subtitle': 'Connect a directory of Markdown and JSON so the agent can use it.',
+        'page.search': 'Search plugins',
+        'page.add': 'Add',
         'page.reading': 'Reading plugins…',
         'page.error': 'Could not read the plugin inventory',
-        'empty.title': 'No plugins found',
-        'empty.hint': 'Create hello/plugin.json inside the directory above to get started.',
-        'card.skills': 'skills',
-        'card.agents': 'agents',
-        'card.hooks': 'hooks',
-        'card.empty': 'no entries',
-        'install.placeholder': 'Paste a GitHub or .zip link',
-        'install.action': 'Install',
-        'install.working': 'Installing…',
-        'install.ok': 'Installed {name}: {skills} skills, {agents} agents.',
-        'install.failed': 'Install failed',
+        'group.installed': 'Installed',
+        'group.empty': 'No plugins here yet',
+        'group.emptyHint': 'Paste a GitHub or .zip link above to install one.',
+        'group.root': 'Plugin directory',
+        'row.skills': 'skills',
+        'row.agents': 'agents',
+        'row.hooks': 'hooks',
+        'row.empty': 'no entries',
+        'add.title': 'Install from a link',
+        'add.hint': 'GitHub repository, a GitHub subdirectory, or a direct .zip URL.',
+        'add.placeholder': 'https://github.com/owner/repo',
+        'add.action': 'Install',
+        'add.working': 'Installing…',
+        'add.cancel': 'Cancel',
+        'add.ok': 'Installed',
+        'add.failed': 'Install failed',
+        'empty.none': 'No plugins matched',
       },
       zh: {
         'entry.label': '文件插件',
-        'page.title': '文件插件',
-        'page.subtitle':
-          '粘贴一个链接就能装：GitHub 仓库、GitHub 子目录，或 .zip 直链。技能和命令会出现在 / 菜单里，子代理会出现在预设里。',
+        'page.title': '插件',
+        'page.subtitle': '连接一个 Markdown 和 JSON 目录，让智能体用上它。',
+        'page.search': '搜索插件',
+        'page.add': '添加',
         'page.reading': '正在读取插件…',
         'page.error': '无法读取插件清单',
-        'empty.title': '没有发现插件',
-        'empty.hint': '把插件链接粘到上面的输入框即可。',
-        'card.skills': '个技能',
-        'card.agents': '个子代理',
-        'card.hooks': '个钩子',
-        'card.empty': '没有内容',
-        'install.placeholder': '粘贴 GitHub 或 .zip 链接',
-        'install.action': '安装',
-        'install.working': '正在安装…',
-        'install.ok': '已安装 {name}：{skills} 个技能，{agents} 个子代理。',
-        'install.failed': '安装失败',
+        'group.installed': '已安装',
+        'group.empty': '还没有插件',
+        'group.emptyHint': '把 GitHub 或 .zip 链接粘到上面的输入框就能装。',
+        'group.root': '插件目录',
+        'row.skills': '个技能',
+        'row.agents': '个子代理',
+        'row.hooks': '个钩子',
+        'row.empty': '没有内容',
+        'add.title': '从链接安装',
+        'add.hint': '支持 GitHub 仓库、GitHub 子目录，或 .zip 直链。',
+        'add.placeholder': 'https://github.com/用户/仓库',
+        'add.action': '安装',
+        'add.working': '正在安装…',
+        'add.cancel': '取消',
+        'add.ok': '已安装',
+        'add.failed': '安装失败',
+        'empty.none': '没有匹配的插件',
       },
     }
 
     /**
-     * Fallback used until the locale service binds, and for any language the
-     * dictionaries do not cover.
+     * Fallback until the locale service binds, and for any uncovered language.
      *
      * @param {string} key
      * @returns {string}
      */
     let translate = (key) => TEXTS.en[key] ?? key
+
+    const styles = {
+      page: {
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflowY: 'auto',
+        color: 'var(--dsw-alias-label-primary)',
+        background: 'var(--dsw-alias-bg-base)',
+        fontSize: '14px',
+        lineHeight: 1.55,
+      },
+      column: {
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        maxWidth: '860px',
+        margin: '0 auto',
+        padding: '36px 32px 56px',
+      },
+
+      // Header: title block on the left, controls on the right, one baseline.
+      headerRow: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: '24px',
+      },
+      headerText: { display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0 },
+      title: { margin: 0, fontSize: '22px', fontWeight: 600, letterSpacing: '-0.015em' },
+      subtitle: {
+        margin: 0,
+        maxWidth: '52ch',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '13px',
+      },
+      controls: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 0 auto' },
+
+      search: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '7px',
+        width: '260px',
+        padding: '7px 11px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '999px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+      },
+      searchInput: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        border: 'none',
+        outline: 'none',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '13px',
+      },
+      addButton: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '7px 16px',
+        border: 'none',
+        borderRadius: '999px',
+        background: 'var(--dsw-alias-label-primary)',
+        color: 'var(--dsw-alias-bg-base)',
+        font: 'inherit',
+        fontSize: '13px',
+        fontWeight: 600,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      },
+
+      // The install surface appears only when asked for, so the list keeps the
+      // page to itself the rest of the time.
+      addPanel: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        margin: '20px 0 0',
+        padding: '16px 18px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '12px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+      },
+      addHead: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px' },
+      addTitle: { fontSize: '13px', fontWeight: 600 },
+      addHint: { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' },
+      addInput: {
+        width: '100%',
+        boxSizing: 'border-box',
+        padding: '9px 12px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '9px',
+        background: 'var(--dsw-alias-bg-base)',
+        color: 'var(--dsw-alias-label-primary)',
+        font: 'inherit',
+        fontSize: '13px',
+      },
+      addActions: { display: 'flex', gap: '8px', justifyContent: 'flex-end' },
+      primary: (enabled) => ({
+        padding: '7px 16px',
+        border: 'none',
+        borderRadius: '8px',
+        background: enabled ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-bg-layer-2)',
+        color: enabled ? 'var(--dsw-alias-bg-base)' : 'var(--dsw-alias-label-secondary)',
+        font: 'inherit',
+        fontSize: '13px',
+        fontWeight: 600,
+        cursor: enabled ? 'pointer' : 'default',
+      }),
+      secondary: {
+        padding: '7px 16px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '8px',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-secondary)',
+        font: 'inherit',
+        fontSize: '13px',
+        cursor: 'pointer',
+      },
+
+      notice: (ok) => ({
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '8px',
+        margin: '12px 0 0',
+        fontSize: '13px',
+        color: ok
+          ? 'var(--dsw-alias-state-success-primary)'
+          : 'var(--dsw-alias-state-error-primary)',
+      }),
+
+      group: { marginTop: '30px' },
+      groupHead: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: '10px',
+        paddingBottom: '10px',
+      },
+      groupTitle: { fontSize: '15px', fontWeight: 600 },
+      groupCount: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      groupNote: {
+        marginLeft: 'auto',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: '11px',
+        overflowWrap: 'anywhere',
+      },
+
+      // Rows, not cards: one grid gives the list its rhythm and keeps each
+      // plugin's identity in the icon column.
+      list: { display: 'flex', flexDirection: 'column', margin: 0, padding: 0, listStyle: 'none' },
+      row: {
+        display: 'grid',
+        gridTemplateColumns: '34px 1fr auto',
+        alignItems: 'center',
+        columnGap: '14px',
+        padding: '12px 12px',
+        margin: '0 -12px',
+        borderRadius: '10px',
+        transition: 'background-color 120ms ease',
+      },
+      icon: {
+        width: '34px',
+        height: '34px',
+        borderRadius: '8px',
+        objectFit: 'cover',
+        background: 'var(--dsw-alias-bg-layer-2)',
+      },
+      iconFallback: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '34px',
+        height: '34px',
+        borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-layer-2)',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontWeight: 600,
+        fontSize: '14px',
+        textTransform: 'uppercase',
+      },
+      rowText: { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 },
+      rowName: { fontSize: '14px', fontWeight: 500 },
+      rowDesc: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '13px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      rowMeta: {
+        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+      },
+
+      empty: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '52px 0',
+        textAlign: 'center',
+      },
+      emptyTitle: { fontWeight: 600 },
+      emptyHint: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' },
+    }
+
+    /** A magnifier drawn in one stroke, matching the host's icon weight. */
+    function SearchIcon() {
+      return h(
+        'svg',
+        {
+          viewBox: '0 0 16 16',
+          width: 14,
+          height: 14,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.5,
+          strokeLinecap: 'round',
+          'aria-hidden': 'true',
+          style: { flex: '0 0 auto', color: 'var(--dsw-alias-label-secondary)' },
+        },
+        h('circle', { cx: 7, cy: 7, r: 4.5 }),
+        h('path', { d: 'M10.4 10.4 14 14' }),
+      )
+    }
 
     /**
      * Sidebar glyph: a folder holding a document, matching the bundle icon.
@@ -99,124 +339,48 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const styles = {
-      page: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-        height: '100%',
-        padding: '24px',
-        overflowY: 'auto',
-        color: 'var(--dsw-alias-label-primary)',
-        background: 'var(--dsw-alias-bg-base)',
-        fontSize: '14px',
-        lineHeight: '1.5',
-      },
-      header: { display: 'flex', flexDirection: 'column', gap: '6px' },
-      title: { margin: 0, fontSize: '18px', fontWeight: 600 },
-      subtitle: { margin: 0, color: 'var(--dsw-alias-label-secondary)' },
-      path: {
-        margin: 0,
-        padding: '8px 10px',
-        borderRadius: '6px',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        color: 'var(--dsw-alias-label-secondary)',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        fontSize: '12px',
-        overflowWrap: 'anywhere',
-      },
-      list: { display: 'flex', flexDirection: 'column', gap: '8px', margin: 0, padding: 0, listStyle: 'none' },
-      card: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        padding: '14px 16px',
-        border: '1px solid var(--dsw-alias-border-l1)',
-        borderRadius: '10px',
-        background: 'var(--dsw-alias-bg-layer-1)',
-      },
-      cardHead: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '12px' },
-      name: { fontWeight: 600 },
-      desc: { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' },
-      tags: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
-      tag: {
-        padding: '2px 8px',
-        borderRadius: '999px',
-        background: 'var(--dsw-alias-bg-layer-2)',
-        color: 'var(--dsw-alias-label-secondary)',
-        fontSize: '12px',
-      },
-      empty: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        padding: '20px',
-        border: '1px dashed var(--dsw-alias-border-l2)',
-        borderRadius: '10px',
-        color: 'var(--dsw-alias-label-secondary)',
-      },
-      error: { color: 'var(--dsw-alias-state-error-primary)', margin: 0 },
-      success: { color: 'var(--dsw-alias-state-success-primary)', margin: 0 },
-      form: { display: 'flex', gap: '8px', alignItems: 'stretch' },
-      input: {
-        flex: '1 1 auto',
-        minWidth: 0,
-        padding: '8px 12px',
-        border: '1px solid var(--dsw-alias-border-l1)',
-        borderRadius: '8px',
-        background: 'var(--dsw-alias-bg-layer-1)',
-        color: 'var(--dsw-alias-label-primary)',
-        fontSize: '13px',
-      },
-      button: {
-        flex: '0 0 auto',
-        padding: '8px 16px',
-        border: '1px solid var(--dsw-alias-border-l2)',
-        borderRadius: '8px',
-        background: 'var(--dsw-alias-brand-primary)',
-        color: 'var(--dsw-alias-bg-base)',
-        fontSize: '13px',
-        fontWeight: 600,
-        cursor: 'pointer',
-      },
-    }
-
     /**
-     * @param {string[]} values
-     * @returns {Array<object>} one tag per name.
+     * @param {{ plugin: object, onHover: (hovered: boolean) => void }} props
      */
-    function tags(values) {
-      return values.map((value) => h('span', { key: value, style: styles.tag }, value))
-    }
+    function PluginRow({ plugin, onHover }) {
+      const parts = []
+      if (plugin.skills > 0) parts.push(`${String(plugin.skills)} ${translate('row.skills')}`)
+      if (plugin.agents > 0) parts.push(`${String(plugin.agents)} ${translate('row.agents')}`)
+      if (plugin.hasHooks) parts.push(translate('row.hooks'))
 
-    /**
-     * @param {{ plugin: object }} props one discovered plugin.
-     */
-    function PluginCard({ plugin }) {
-      const meta = []
-      if (plugin.skills > 0) meta.push(`${String(plugin.skills)} ${translate('card.skills')}`)
-      if (plugin.agents > 0) meta.push(`${String(plugin.agents)} ${translate('card.agents')}`)
-      if (plugin.hasHooks) meta.push(translate('card.hooks'))
+      const glyph = plugin.hasIcon
+        ? h('img', {
+            src: `/api/plugin-file/icon/${encodeURIComponent(plugin.name)}`,
+            alt: '',
+            style: styles.icon,
+            loading: 'lazy',
+          })
+        : h('span', { style: styles.iconFallback, 'aria-hidden': 'true' }, plugin.name.slice(0, 1))
 
       return h(
         'li',
-        { style: styles.card },
+        {
+          style: styles.row,
+          onMouseEnter: () => onHover(true),
+          onMouseLeave: () => onHover(false),
+        },
+        glyph,
         h(
           'div',
-          { style: styles.cardHead },
-          h('span', { style: styles.name }, plugin.name),
-          h('span', { style: styles.tag }, meta.length === 0 ? translate('card.empty') : meta.join(' · ')),
+          { style: styles.rowText },
+          h('span', { style: styles.rowName }, plugin.name),
+          h(
+            'span',
+            { style: styles.rowDesc },
+            plugin.description ?? plugin.skillsNamed.slice(0, 3).map((name) => `/${name}`).join('  ') ?? '',
+          ),
         ),
-        plugin.description === undefined ? null : h('p', { style: styles.desc }, plugin.description),
-        plugin.skillsNamed.length === 0
-          ? null
-          : h('div', { style: styles.tags }, tags(plugin.skillsNamed.map((name) => `/${name}`))),
-        plugin.agentsNamed.length === 0 ? null : h('div', { style: styles.tags }, tags(plugin.agentsNamed)),
+        h('span', { style: styles.rowMeta }, parts.length === 0 ? translate('row.empty') : parts.join(' · ')),
       )
     }
 
     /**
-     * Read the Host inventory over the route the plugin registers.
+     * Read the Host inventory.
      *
      * @returns {Promise<{ root: string, plugins: object[] }>}
      */
@@ -226,10 +390,7 @@ window.__ModuleLoader__.load({
         credentials: 'same-origin',
       })
       if (!response.ok) {
-        const detail = await response.text().catch(() => '')
-        throw new Error(
-          `/api/plugin-file/inventory -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`,
-        )
+        throw new Error(`inventory -> ${String(response.status)} ${response.statusText}`)
       }
       return response.json()
     }
@@ -250,35 +411,36 @@ window.__ModuleLoader__.load({
       })
       const body = await response.json().catch(() => undefined)
       if (body === undefined) {
-        return { ok: false, error: { code: 'bad-response', message: `${String(response.status)} ${response.statusText}` } }
+        return {
+          ok: false,
+          error: { code: 'bad-response', message: `${String(response.status)} ${response.statusText}` },
+        }
       }
       return body
     }
 
+    /** Bound `t` for this namespace once the locale service is available. */
+    let localeService
+
     /**
      * The main-slot page.
-     *
-     * Reads the Host inventory once per mount. A failed read is shown in
-     * place: an empty list would misreport a load failure as "no plugins".
      */
     function PanelPage() {
       const [state, setState] = React.useState({ status: 'loading' })
+      const [query, setQuery] = React.useState('')
+      const [adding, setAdding] = React.useState(false)
       const [draft, setDraft] = React.useState('')
       const [installing, setInstalling] = React.useState(false)
       const [outcome, setOutcome] = React.useState(undefined)
       const [, bumpLocale] = React.useState(0)
 
-      // Re-render on a language switch. The locale service publishes through
-      // a snapshot, so the component subscribes instead of reading once.
       React.useEffect(() => {
         const locale = localeService
         if (locale === undefined) return undefined
-        return locale.subscribe(() => {
-          bumpLocale((value) => value + 1)
-        })
+        return locale.subscribe(() => bumpLocale((value) => value + 1))
       }, [])
 
-      const reload = React.useCallback(() => {
+      const load = React.useCallback(() => {
         readInventory().then(
           (value) => setState({ status: 'ready', value }),
           (error) => setState({ status: 'error', error }),
@@ -313,9 +475,10 @@ window.__ModuleLoader__.load({
             setOutcome(result)
             if (result.ok) {
               setDraft('')
-              // The Host already refreshed its catalog; re-read so the list
-              // reflects what was just installed.
-              reload()
+              // Close only on success: a failed install should leave the field
+              // in place so the link can be corrected and retried.
+              setAdding(false)
+              load()
             }
           } catch (error) {
             setOutcome({ ok: false, error: { code: 'network', message: String(error) } })
@@ -323,96 +486,185 @@ window.__ModuleLoader__.load({
             setInstalling(false)
           }
         },
-        [draft, installing, reload],
+        [draft, installing, load],
       )
-
-      const form = h(
-        'form',
-        { onSubmit: submit, style: styles.form },
-        h('input', {
-          type: 'url',
-          value: draft,
-          onChange: (event) => setDraft(event.target.value),
-          placeholder: translate('install.placeholder'),
-          spellCheck: false,
-          disabled: installing,
-          'aria-label': translate('install.placeholder'),
-          style: styles.input,
-        }),
-        h(
-          'button',
-          { type: 'submit', disabled: installing || draft.trim() === '', style: styles.button },
-          installing ? translate('install.working') : translate('install.action'),
-        ),
-      )
-
-      const notice =
-        outcome === undefined
-          ? null
-          : outcome.ok
-            ? h(
-                'p',
-                { style: styles.success },
-                translate('install.ok')
-                  .replace('{name}', String(outcome.name))
-                  .replace('{skills}', String(outcome.skills ?? 0))
-                  .replace('{agents}', String(outcome.agents ?? 0)),
-              )
-            : h(
-                'p',
-                { style: styles.error },
-                `${translate('install.failed')}: ${outcome.error?.message ?? ''}`,
-              )
 
       if (state.status === 'loading') {
-        return h('div', { style: styles.page }, h('p', { style: styles.subtitle }, translate('page.reading')))
+        return h('div', { style: styles.page }, h('div', { style: styles.column }, h('p', { style: styles.subtitle }, translate('page.reading'))))
       }
 
       if (state.status === 'error') {
         return h(
           'div',
           { style: styles.page },
-          h('p', { style: styles.error }, `${translate('page.error')}: ${String(state.error)}`),
+          h(
+            'div',
+            { style: styles.column },
+            h('p', { style: { ...styles.subtitle, color: 'var(--dsw-alias-state-error-primary)' } },
+              `${translate('page.error')}: ${String(state.error)}`),
+          ),
         )
       }
 
       const { root, plugins } = state.value
+      const needle = query.trim().toLowerCase()
+      const shown =
+        needle === ''
+          ? plugins
+          : plugins.filter(
+              (plugin) =>
+                plugin.name.toLowerCase().includes(needle) ||
+                (plugin.description ?? '').toLowerCase().includes(needle) ||
+                plugin.skillsNamed.some((name) => name.toLowerCase().includes(needle)),
+            )
 
       return h(
         'div',
         { style: styles.page, 'data-dsh-plugin': 'file-plugins' },
         h(
-          'header',
-          { style: styles.header },
-          h('h1', { style: styles.title }, translate('page.title')),
-          h('p', { style: styles.subtitle }, translate('page.subtitle')),
-        ),
-        form,
-        notice,
-        h('p', { style: styles.path }, root),
-        plugins.length === 0
-          ? h(
+          'div',
+          { style: styles.column },
+
+          h(
+            'div',
+            { style: styles.headerRow },
+            h(
               'div',
-              { style: styles.empty },
-              h('strong', { style: styles.name }, translate('empty.title')),
-              h('span', null, translate('empty.hint')),
-            )
-          : h('ul', { style: styles.list }, plugins.map((plugin) => h(PluginCard, { key: plugin.name, plugin }))),
+              { style: styles.headerText },
+              h('h1', { style: styles.title }, translate('page.title')),
+              h('p', { style: styles.subtitle }, translate('page.subtitle')),
+            ),
+            h(
+              'div',
+              { style: styles.controls },
+              h(
+                'label',
+                { style: styles.search },
+                h(SearchIcon),
+                h('input', {
+                  type: 'search',
+                  value: query,
+                  onChange: (event) => setQuery(event.target.value),
+                  placeholder: translate('page.search'),
+                  'aria-label': translate('page.search'),
+                  style: styles.searchInput,
+                }),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => {
+                    setAdding((open) => !open)
+                    setOutcome(undefined)
+                  },
+                  'aria-expanded': adding,
+                  style: styles.addButton,
+                },
+                translate('page.add'),
+              ),
+            ),
+          ),
+
+          adding
+            ? h(
+                'form',
+                { style: styles.addPanel, onSubmit: submit },
+                h(
+                  'div',
+                  { style: styles.addHead },
+                  h('span', { style: styles.addTitle }, translate('add.title')),
+                  h('p', { style: styles.addHint }, translate('add.hint')),
+                ),
+                h('input', {
+                  type: 'url',
+                  value: draft,
+                  onChange: (event) => setDraft(event.target.value),
+                  placeholder: translate('add.placeholder'),
+                  spellCheck: false,
+                  autoFocus: true,
+                  disabled: installing,
+                  'aria-label': translate('add.placeholder'),
+                  style: styles.addInput,
+                }),
+                h(
+                  'div',
+                  { style: styles.addActions },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      onClick: () => {
+                        setAdding(false)
+                        setOutcome(undefined)
+                      },
+                      style: styles.secondary,
+                    },
+                    translate('add.cancel'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'submit',
+                      disabled: installing || draft.trim() === '',
+                      style: styles.primary(!installing && draft.trim() !== ''),
+                    },
+                    installing ? translate('add.working') : translate('add.action'),
+                  ),
+                ),
+              )
+            : null,
+
+          outcome === undefined
+            ? null
+            : h(
+                'p',
+                { style: styles.notice(outcome.ok) },
+                outcome.ok
+                  ? `${translate('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${translate('row.skills')} · ${String(outcome.agents ?? 0)} ${translate('row.agents')}`
+                  : `${translate('add.failed')}: ${outcome.error?.message ?? ''}`,
+              ),
+
+          h(
+            'section',
+            { style: styles.group },
+            h(
+              'div',
+              { style: styles.groupHead },
+              h('span', { style: styles.groupTitle }, translate('group.installed')),
+              h('span', { style: styles.groupCount }, String(shown.length)),
+              h('span', { style: styles.groupNote, title: root }, translate('group.root')),
+            ),
+            shown.length === 0
+              ? h(
+                  'div',
+                  { style: styles.empty },
+                  h('span', { style: styles.emptyTitle }, plugins.length === 0 ? translate('group.empty') : translate('empty.none')),
+                  h('span', { style: styles.emptyHint }, plugins.length === 0 ? translate('group.emptyHint') : ''),
+                )
+              : h(
+                  'ul',
+                  { style: styles.list },
+                  shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, onHover: () => {} })),
+                ),
+          ),
+        ),
       )
     }
-
-    /** Bound `t` for this namespace once the locale service is available. */
-    let localeService
 
     return {
       inject: ['slots'],
       apply(ctx) {
-        const locale = ctx.get('locale')
-        if (locale !== undefined) {
+        // The locale service is optional and may activate after this plugin.
+        // Reading it with `ctx.get` during apply would leave the panel on its
+        // English fallback forever, so wait for it explicitly.
+        ctx.inject(['locale'], (inner) => {
+          const locale = inner.get('locale')
+          if (locale === undefined) return
           localeService = locale
           locale.register('plugin-file', TEXTS)
           translate = locale.bind('plugin-file')
-        }
+        })
 
         const slots = ctx.slots
         slots.inject('sidebar.panellist', () =>
