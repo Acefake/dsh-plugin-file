@@ -535,7 +535,7 @@ window.__ModuleLoader__.load({
      * @returns {Promise<{ ok: boolean, source?: object, error?: { code: string, message: string } }>}
      */
     async function mutateMarket(body) {
-      const response = await fetch('/api/plugin-file/markets', {
+      const response = await fetch('/api/plugin-file/markets/edit', {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         credentials: 'same-origin',

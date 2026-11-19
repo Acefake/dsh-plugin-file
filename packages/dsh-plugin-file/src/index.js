@@ -300,25 +300,29 @@ function registerInventoryRoute(ctx, inventory) {
       },
     })
 
-    // Marketplaces: one GET for the whole picture, and one POST whose `action`
-    // selects the mutation. Two verbs keep the route table small.
+    // Reading the marketplaces is a plain GET, so it uses a `resource` route
+    // like the inventory one. Mutations need a body, so they use a `handler`
+    // under a different path: a route accepts only one shape, and mixing the
+    // verbs would have forced the read onto the handler path too.
     const disposeMarkets = webServer.register({
       kind: 'exact',
       path: '/api/plugin-file/markets',
-      handler: async (req, res) => {
-        if (req.method === 'GET') {
-          const url = new URL(req.url ?? '/', 'http://localhost')
-          const refresh = url.searchParams.get('refresh') === '1'
-          try {
-            sendJson(res, 200, await inventory.markets({ refresh }))
-          } catch (error) {
-            sendJson(res, 500, { error: describe(error) })
-          }
-          return
+      resource: async (request) => {
+        const refresh = new URL(request.url).searchParams.get('refresh') === '1'
+        try {
+          return Response.json(await inventory.markets({ refresh }))
+        } catch (error) {
+          return Response.json({ error: describe(error) }, { status: 500 })
         }
+      },
+    })
 
+    const disposeMarketsWrite = webServer.register({
+      kind: 'exact',
+      path: '/api/plugin-file/markets/edit',
+      handler: async (req, res) => {
         if (req.method !== 'POST') {
-          sendJson(res, 405, { ok: false, error: { code: 'method', message: 'use GET or POST' } }, { allow: 'GET, POST' })
+          sendJson(res, 405, { ok: false, error: { code: 'method', message: 'use POST' } }, { allow: 'POST' })
           return
         }
 
@@ -331,6 +335,7 @@ function registerInventoryRoute(ctx, inventory) {
         }
 
         const action = typeof body?.action === 'string' ? body.action : ''
+
         if (action === 'add') {
           const url = typeof body?.url === 'string' ? body.url : ''
           if (url === '') {
@@ -360,6 +365,7 @@ function registerInventoryRoute(ctx, inventory) {
     inner.effect(() => disposeIcon, 'plugin-file icon route')
     inner.effect(() => disposePost, 'plugin-file install route')
     inner.effect(() => disposeMarkets, 'plugin-file markets route')
+    inner.effect(() => disposeMarketsWrite, 'plugin-file markets write route')
     ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,icon,install,markets}')
   })
 }
