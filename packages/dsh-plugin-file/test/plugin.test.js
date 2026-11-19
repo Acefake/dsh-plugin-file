@@ -285,13 +285,50 @@ test('the inventory route answers with the same service value', async () => {
 
     apply(ctx, { pluginRoot: root, watch: false })
 
-    assert.equal(routes.length, 1)
-    assert.equal(routes[0].path, '/api/plugin-file/inventory')
+    const inventoryRoute = routes.find((route) => route.path === '/api/plugin-file/inventory')
+    const installRoute = routes.find((route) => route.path === '/api/plugin-file/install')
+    assert.ok(inventoryRoute !== undefined, 'the inventory route is registered')
+    assert.ok(installRoute !== undefined, 'the install route is registered')
 
-    const response = await routes[0].resource()
+    const response = await inventoryRoute.resource()
     assert.equal(response.status, 200)
     const body = await response.json()
     assert.equal(body.plugins[0].name, 'demo')
+  })
+})
+
+test('the install route refuses everything but a POST with a url', async () => {
+  await withRoot(async (root) => {
+    await write(root, 'demo/plugin.json', '{}')
+
+    const { ctx } = fakeContext()
+    const routes = []
+    ctx.get = (name) =>
+      name === 'webServer'
+        ? { register: (route) => { routes.push(route); return () => {} } }
+        : name === 'agentPresets'
+          ? ctx.agentPresets
+          : undefined
+
+    apply(ctx, { pluginRoot: root, watch: false })
+    const install = routes.find((route) => route.path === '/api/plugin-file/install')
+
+    const get = await install.resource(new Request('http://x/api/plugin-file/install', { method: 'GET' }))
+    assert.equal(get.status, 405)
+
+    const empty = await install.resource(
+      new Request('http://x/api/plugin-file/install', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+    )
+    assert.equal(empty.status, 400)
+
+    const malformed = await install.resource(
+      new Request('http://x/api/plugin-file/install', { method: 'POST', body: 'not json' }),
+    )
+    assert.equal(malformed.status, 400)
   })
 })
 

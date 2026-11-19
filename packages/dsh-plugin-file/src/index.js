@@ -21,6 +21,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { discoverPlugins } from './discover.js'
+import { installFromUrl } from './install.js'
 import { parseMarkdown } from './parse.js'
 
 export const name = 'plugin-file'
@@ -62,7 +63,94 @@ function inventoryService(loader) {
       await loader.refresh()
       return { root: loader.root, plugins: loader.inventory() }
     },
+
+    /**
+     * Install one plugin from a link, then re-read the catalog.
+     *
+     * The loader is invalidated inside this call rather than left to the file
+     * watcher: a user who pasted a link and got a success result expects the
+     * next catalog read to include it, and the watcher is debounced.
+     *
+     * @param {string} url
+     * @returns {Promise<object>}
+     */
+    async install(url) {
+      const result = await installFromUrl(url, { root: loader.root })
+      if (result.ok) {
+        await loader.refresh()
+        loader.invalidate()
+      }
+      return result
+    },
   }
+}
+
+/**
+ * Give the agent the same install operation the panel uses.
+ *
+ * One operation, two callers: the tool and the route both end at
+ * `inventory.install`, so a link pasted into the chat and one pasted into the
+ * panel behave identically.
+ *
+ * @param {import('@deepseek-ai/cordis').Context} ctx
+ * @param {{ install: (url: string) => Promise<object>, inventory: () => Promise<object> }} inventory
+ */
+function registerInstallTool(ctx, inventory) {
+  ctx.inject(['tools'], (inner) => {
+    const tools = inner.get('tools')
+    if (tools === undefined) return
+
+    inner.effect(() => tools.register({
+      name: 'install_file_plugin',
+      description:
+        'Install a DeepSeek Harness file plugin from a link. Accepts a GitHub repository, a GitHub subdirectory (tree) link, or a direct .zip URL. Downloads, validates the plugin.json, and copies it into the plugin directory so its skills, commands, and subagents become available.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description:
+              'The link to install from, for example https://github.com/owner/repo, https://github.com/owner/repo/tree/main/plugins/name, or https://example.com/plugin.zip',
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+      output: {
+        schema: {
+          type: 'object',
+          properties: {
+            ok: { type: 'boolean' },
+            name: { type: 'string' },
+            dir: { type: 'string' },
+            skills: { type: 'number' },
+            agents: { type: 'number' },
+            replaced: { type: 'boolean' },
+            error: {
+              type: 'object',
+              properties: { code: { type: 'string' }, message: { type: 'string' } },
+              additionalProperties: false,
+            },
+          },
+          required: ['ok'],
+          additionalProperties: false,
+        },
+        render(_args, value) {
+          const body = typeof value === 'string' ? value : JSON.stringify(value)
+          return [{ type: 'text', text: body }]
+        },
+      },
+      async execute(args) {
+        const url = typeof args?.url === 'string' ? args.url : ''
+        if (url === '') {
+          return { ok: false, error: { code: 'invalid-url', message: 'url is required' } }
+        }
+        return inventory.install(url)
+      },
+    }), 'plugin-file install tool')
+
+    ctx.logger.info('plugin-file: install_file_plugin tool registered')
+  })
 }
 
 /**
@@ -81,6 +169,7 @@ export function apply(ctx, config = {}) {
   const inventory = inventoryService(loader)
   ctx.provide('pluginFile', inventory)
   registerInventoryRoute(ctx, inventory)
+  registerInstallTool(ctx, inventory)
 
   ctx.effect(function* () {
     yield async () => {
@@ -107,29 +196,45 @@ function registerInventoryRoute(ctx, inventory) {
     // normal headless arrangement, not a defect worth a warning.
     if (webServer === undefined) return
 
-    try {
-      const disposeRoute = webServer.register({
-        kind: 'exact',
-        path: '/api/plugin-file/inventory',
-        resource: async () => {
-          try {
-            return Response.json(await inventory.inventory())
-          } catch (error) {
-            return Response.json(
-              { error: error instanceof Error ? error.message : String(error) },
-              { status: 500 },
-            )
-          }
-        },
-      })
+    const disposeGet = webServer.register({
+      kind: 'exact',
+      path: '/api/plugin-file/inventory',
+      resource: async () => {
+        try {
+          return Response.json(await inventory.inventory())
+        } catch (error) {
+          return Response.json({ error: describe(error) }, { status: 500 })
+        }
+      },
+    })
 
-      inner.effect(() => disposeRoute, 'plugin-file inventory route')
-      ctx.logger.info('plugin-file: inventory route registered at /api/plugin-file/inventory')
-    } catch (error) {
-      // A duplicate path or an unbound server is a composition conflict; say
-      // so instead of leaving the panel to fail with an unexplained 404.
-      ctx.logger.warn(`plugin-file: inventory route was not registered: ${describe(error)}`)
-    }
+    const disposePost = webServer.register({
+      kind: 'exact',
+      path: '/api/plugin-file/install',
+      // A POST route: the installer mutates the plugin root, so it must not be
+      // reachable by a plain navigation or a prefetch.
+      resource: async (request) => {
+        if (request.method !== 'POST') {
+          return new Response('method not allowed', { status: 405, headers: { allow: 'POST' } })
+        }
+        let url
+        try {
+          const body = await request.json()
+          url = typeof body?.url === 'string' ? body.url : ''
+        } catch {
+          return Response.json({ ok: false, error: { code: 'invalid-body', message: 'expected { url }' } }, { status: 400 })
+        }
+        if (url === '') {
+          return Response.json({ ok: false, error: { code: 'invalid-body', message: 'url is required' } }, { status: 400 })
+        }
+        const result = await inventory.install(url)
+        return Response.json(result, { status: result.ok ? 200 : 400 })
+      },
+    })
+
+    inner.effect(() => disposeGet, 'plugin-file inventory route')
+    inner.effect(() => disposePost, 'plugin-file install route')
+    ctx.logger.info('plugin-file: routes registered at /api/plugin-file/{inventory,install}')
   })
 }
 
@@ -280,6 +385,16 @@ class FilePluginLoader {
         skillsNamed: plugin.skills.map((entry) => entry.name),
         agentsNamed: plugin.agents.map((entry) => entry.name),
       }))
+  }
+
+  /**
+   * Ask the registry to re-read this provider's catalog.
+   *
+   * Used after an installation so the very next read sees the new plugin
+   * instead of waiting for the watcher's debounce.
+   */
+  invalidate() {
+    this.#control?.invalidate()
   }
 
   /**

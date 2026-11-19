@@ -38,20 +38,30 @@ window.__ModuleLoader__.load({
         'card.agents': 'agents',
         'card.hooks': 'hooks',
         'card.empty': 'no entries',
+        'install.placeholder': 'Paste a GitHub or .zip link',
+        'install.action': 'Install',
+        'install.working': 'Installing…',
+        'install.ok': 'Installed {name}: {skills} skills, {agents} agents.',
+        'install.failed': 'Install failed',
       },
       zh: {
         'entry.label': '文件插件',
         'page.title': '文件插件',
         'page.subtitle':
-          '把一个带 plugin.json 的目录放进插件目录。技能和命令会出现在 / 菜单里，子代理会出现在预设里。',
+          '粘贴一个链接就能装：GitHub 仓库、GitHub 子目录，或 .zip 直链。技能和命令会出现在 / 菜单里，子代理会出现在预设里。',
         'page.reading': '正在读取插件…',
         'page.error': '无法读取插件清单',
         'empty.title': '没有发现插件',
-        'empty.hint': '在上面的目录里创建 hello/plugin.json 即可开始。',
+        'empty.hint': '把插件链接粘到上面的输入框即可。',
         'card.skills': '个技能',
         'card.agents': '个子代理',
         'card.hooks': '个钩子',
         'card.empty': '没有内容',
+        'install.placeholder': '粘贴 GitHub 或 .zip 链接',
+        'install.action': '安装',
+        'install.working': '正在安装…',
+        'install.ok': '已安装 {name}：{skills} 个技能，{agents} 个子代理。',
+        'install.failed': '安装失败',
       },
     }
 
@@ -146,6 +156,29 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-secondary)',
       },
       error: { color: 'var(--dsw-alias-state-error-primary)', margin: 0 },
+      success: { color: 'var(--dsw-alias-state-success-primary)', margin: 0 },
+      form: { display: 'flex', gap: '8px', alignItems: 'stretch' },
+      input: {
+        flex: '1 1 auto',
+        minWidth: 0,
+        padding: '8px 12px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        color: 'var(--dsw-alias-label-primary)',
+        fontSize: '13px',
+      },
+      button: {
+        flex: '0 0 auto',
+        padding: '8px 16px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: '8px',
+        background: 'var(--dsw-alias-brand-primary)',
+        color: 'var(--dsw-alias-bg-base)',
+        fontSize: '13px',
+        fontWeight: 600,
+        cursor: 'pointer',
+      },
     }
 
     /**
@@ -188,18 +221,38 @@ window.__ModuleLoader__.load({
      * @returns {Promise<{ root: string, plugins: object[] }>}
      */
     async function readInventory() {
-      const url = '/api/plugin-file/inventory'
-      const response = await fetch(url, {
+      const response = await fetch('/api/plugin-file/inventory', {
         headers: { accept: 'application/json' },
         credentials: 'same-origin',
       })
       if (!response.ok) {
         const detail = await response.text().catch(() => '')
         throw new Error(
-          `${url} -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`,
+          `/api/plugin-file/inventory -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`,
         )
       }
       return response.json()
+    }
+
+    /**
+     * Ask the Host to install one plugin from a link.
+     *
+     * @param {string} url
+     * @returns {Promise<{ ok: boolean, name?: string, skills?: number, agents?: number,
+     *   replaced?: boolean, error?: { code: string, message: string } }>}
+     */
+    async function installPlugin(url) {
+      const response = await fetch('/api/plugin-file/install', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ url }),
+      })
+      const body = await response.json().catch(() => undefined)
+      if (body === undefined) {
+        return { ok: false, error: { code: 'bad-response', message: `${String(response.status)} ${response.statusText}` } }
+      }
+      return body
     }
 
     /**
@@ -210,6 +263,9 @@ window.__ModuleLoader__.load({
      */
     function PanelPage() {
       const [state, setState] = React.useState({ status: 'loading' })
+      const [draft, setDraft] = React.useState('')
+      const [installing, setInstalling] = React.useState(false)
+      const [outcome, setOutcome] = React.useState(undefined)
       const [, bumpLocale] = React.useState(0)
 
       // Re-render on a language switch. The locale service publishes through
@@ -222,9 +278,15 @@ window.__ModuleLoader__.load({
         })
       }, [])
 
+      const reload = React.useCallback(() => {
+        readInventory().then(
+          (value) => setState({ status: 'ready', value }),
+          (error) => setState({ status: 'error', error }),
+        )
+      }, [])
+
       React.useEffect(() => {
         let alive = true
-
         readInventory().then(
           (value) => {
             if (alive) setState({ status: 'ready', value })
@@ -233,11 +295,74 @@ window.__ModuleLoader__.load({
             if (alive) setState({ status: 'error', error })
           },
         )
-
         return () => {
           alive = false
         }
       }, [])
+
+      const submit = React.useCallback(
+        async (event) => {
+          event.preventDefault()
+          const url = draft.trim()
+          if (url === '' || installing) return
+
+          setInstalling(true)
+          setOutcome(undefined)
+          try {
+            const result = await installPlugin(url)
+            setOutcome(result)
+            if (result.ok) {
+              setDraft('')
+              // The Host already refreshed its catalog; re-read so the list
+              // reflects what was just installed.
+              reload()
+            }
+          } catch (error) {
+            setOutcome({ ok: false, error: { code: 'network', message: String(error) } })
+          } finally {
+            setInstalling(false)
+          }
+        },
+        [draft, installing, reload],
+      )
+
+      const form = h(
+        'form',
+        { onSubmit: submit, style: styles.form },
+        h('input', {
+          type: 'url',
+          value: draft,
+          onChange: (event) => setDraft(event.target.value),
+          placeholder: translate('install.placeholder'),
+          spellCheck: false,
+          disabled: installing,
+          'aria-label': translate('install.placeholder'),
+          style: styles.input,
+        }),
+        h(
+          'button',
+          { type: 'submit', disabled: installing || draft.trim() === '', style: styles.button },
+          installing ? translate('install.working') : translate('install.action'),
+        ),
+      )
+
+      const notice =
+        outcome === undefined
+          ? null
+          : outcome.ok
+            ? h(
+                'p',
+                { style: styles.success },
+                translate('install.ok')
+                  .replace('{name}', String(outcome.name))
+                  .replace('{skills}', String(outcome.skills ?? 0))
+                  .replace('{agents}', String(outcome.agents ?? 0)),
+              )
+            : h(
+                'p',
+                { style: styles.error },
+                `${translate('install.failed')}: ${outcome.error?.message ?? ''}`,
+              )
 
       if (state.status === 'loading') {
         return h('div', { style: styles.page }, h('p', { style: styles.subtitle }, translate('page.reading')))
@@ -262,6 +387,8 @@ window.__ModuleLoader__.load({
           h('h1', { style: styles.title }, translate('page.title')),
           h('p', { style: styles.subtitle }, translate('page.subtitle')),
         ),
+        form,
+        notice,
         h('p', { style: styles.path }, root),
         plugins.length === 0
           ? h(
