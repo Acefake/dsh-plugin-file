@@ -47,6 +47,12 @@ function fakeContext() {
         registrations.warned.push(message)
       },
     },
+    // Cordis exposes an optional service through `ctx.get(name)`; a direct
+    // property read throws when the composition does not mount it, so the
+    // plugin must use this form and the stand-in must match.
+    get(name) {
+      return name === 'agentPresets' ? ctx.agentPresets : undefined
+    },
   }
 
   return { ctx, registrations }
@@ -198,4 +204,57 @@ test('a missing plugin root lists nothing and warns about nothing', async () => 
 
   assert.deepEqual(listed, [])
   assert.deepEqual(registrations.warned, [])
+})
+
+test('a preset registry that throws does not remove the skill catalog', async () => {
+  await withRoot(async (root) => {
+    await write(root, 'demo/plugin.json', '{}')
+    await write(root, 'demo/skills/kept.md', '---\nname: kept\ndescription: d\n---\nb\n')
+    await write(
+      root,
+      'demo/agents/broken.md',
+      '---\nname: broken\ndescription: d\n---\nbody\n',
+    )
+
+    const { ctx, registrations } = fakeContext()
+    ctx.agentPresets.register = async () => {
+      throw new Error('preset registry unavailable')
+    }
+
+    apply(ctx, { pluginRoot: root, watch: false })
+    const provider = registrations.providers[0].provider
+    const listed = await provider.list({ cwd: root })
+    const candidates = Array.isArray(listed) ? listed : listed.candidates
+
+    // The registry drops every provider's catalog when one provider throws, so
+    // a preset-registration failure must never escape into `list()`.
+    assert.deepEqual(candidates.map((entry) => entry.name), ['kept'])
+    assert.ok(registrations.warned.some((message) => message.includes('preset')))
+  })
+})
+
+test('an absolute failure inside discovery still yields a result', async () => {
+  await withRoot(async (root) => {
+    await write(root, 'demo/plugin.json', '{}')
+    await write(root, 'demo/skills/kept.md', '---\nname: kept\ndescription: d\n---\nb\n')
+
+    const { ctx, registrations } = fakeContext()
+
+    // Force the deepest failure a caller can reach: reading the root itself.
+    let call = 0
+    const originalGet = ctx.get
+    ctx.get = (name) => {
+      call += 1
+      if (call === 1) throw new Error('exploding registry')
+      return originalGet?.(name)
+    }
+
+    apply(ctx, { pluginRoot: root, watch: false })
+    const provider = registrations.providers[0].provider
+
+    // list() must resolve, never reject: a rejection hides every other
+    // provider's skills from the same catalog.
+    const listed = await provider.list({ cwd: root })
+    assert.ok(listed !== undefined)
+  })
 })

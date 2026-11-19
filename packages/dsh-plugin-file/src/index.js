@@ -112,8 +112,18 @@ class FilePluginLoader {
     return {
       name: 'plugin-file',
       async list(options) {
-        const complete = await loader.refresh()
-        return complete ? loader.candidates() : { candidates: loader.candidates(), complete: false }
+        try {
+          const complete = await loader.refresh()
+          return complete
+            ? loader.candidates()
+            : { candidates: loader.candidates(), complete: false }
+        } catch (error) {
+          // The registry treats a throwing provider as failed discovery and
+          // drops the whole catalog, including every other provider's skills.
+          // A loader defect must cost only this provider's entries.
+          loader.ctx.logger.warn(`plugin-file: discovery failed: ${describe(error)}`)
+          return loader.candidates()
+        }
       },
       async get(candidate, options) {
         const locator = candidate.locator
@@ -158,7 +168,14 @@ class FilePluginLoader {
     }
 
     this.#plugins = new Map(report.plugins.map((plugin) => [plugin.name, plugin]))
-    await this.#reconcileAgents(report.plugins)
+
+    try {
+      await this.#reconcileAgents(report.plugins)
+    } catch (error) {
+      // Preset registration is a separate surface: a failure there must not
+      // hide the skills this loader already discovered.
+      this.ctx.logger.warn(`plugin-file: agent presets could not be reconciled: ${describe(error)}`)
+    }
 
     return warnings.length === 0
   }
@@ -202,7 +219,10 @@ class FilePluginLoader {
    * @param {object[]} plugins
    */
   async #reconcileAgents(plugins) {
-    const presets = this.ctx.agentPresets
+    // The preset registry is optional: this plugin only injects `skills`, so a
+    // direct property read would throw on a composition without presets. Every
+    // other lookup in Cordis takes this same guarded form.
+    const presets = this.ctx.get('agentPresets')
     if (presets === undefined) return
 
     /** @type {Map<string, { entry: object, disposer: () => Promise<void> }>} */
