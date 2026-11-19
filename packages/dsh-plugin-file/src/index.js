@@ -16,9 +16,9 @@
  */
 
 import { watch } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import { discoverPlugins } from './discover.js'
 import { installFromUrl } from './install.js'
@@ -116,11 +116,31 @@ function inventoryService(loader) {
     },
 
     /**
-     * @param {string} name
+     * Stop listing one marketplace.
+     *
+     * This removes the source only. The plugins it offered stay installed:
+     * a marketplace is a listing, not an owner of what was installed through it.
+     *
+     * @param {string} id
+     * @returns {Promise<{ ok: boolean }>}
      */
     async removeMarket(id) {
       const removed = await markets.remove(id)
       return { ok: removed }
+    },
+
+    /**
+     * Uninstall one plugin by removing its directory.
+     *
+     * A marketplace and the plugins it lists are separate: removing a market
+     * only stops listing what it offers, and a plugin stays until it is
+     * removed here.
+     *
+     * @param {string} name
+     * @returns {Promise<{ ok: boolean, error?: { code: string, message: string } }>}
+     */
+    async uninstall(name) {
+      return loader.uninstall(name)
     },
 
     /**
@@ -372,7 +392,21 @@ function registerInventoryRoute(ctx, inventory) {
           return
         }
 
-        sendJson(res, 400, { ok: false, error: { code: 'invalid-action', message: 'action must be add or remove' } })
+        // Uninstalling a plugin is a different operation from removing a
+        // marketplace: a market only lists what it offers, and the plugins it
+        // offered stay installed until they are removed on their own.
+        if (action === 'uninstall') {
+          const name = typeof body?.name === 'string' ? body.name : ''
+          if (name === '') {
+            sendJson(res, 400, { ok: false, error: { code: 'invalid-body', message: 'name is required' } })
+            return
+          }
+          const result = await inventory.uninstall(name)
+          sendJson(res, result.ok ? 200 : 400, result)
+          return
+        }
+
+        sendJson(res, 400, { ok: false, error: { code: 'invalid-action', message: 'action must be add, remove, or uninstall' } })
       },
     })
 
@@ -603,6 +637,42 @@ class FilePluginLoader {
    */
   invalidate() {
     this.#control?.invalidate()
+  }
+
+  /**
+   * Delete one plugin directory and forget it.
+   *
+   * The name comes from a request, so it is matched against what discovery
+   * actually found rather than being turned into a path: a name that does not
+   * correspond to a discovered plugin cannot address a directory at all.
+   *
+   * @param {string} name
+   * @returns {Promise<{ ok: boolean, error?: { code: string, message: string } }>}
+   */
+  async uninstall(name) {
+    await this.refresh()
+
+    const plugin = this.#plugins.get(name)
+    if (plugin === undefined) {
+      return { ok: false, error: { code: 'not-found', message: `no plugin named ${name}` } }
+    }
+
+    // Refuse anything that is not directly inside the root: discovery builds
+    // this path itself, but a defensive check costs nothing here.
+    const inside = relative(resolve(this.root), resolve(plugin.dir))
+    if (inside === '' || inside.startsWith('..') || isAbsolute(inside) || inside.includes(sep)) {
+      return { ok: false, error: { code: 'unsafe-path', message: `${name} is not a directory under the plugin root` } }
+    }
+
+    try {
+      await rm(plugin.dir, { recursive: true, force: true })
+    } catch (error) {
+      return { ok: false, error: { code: 'remove-failed', message: describe(error) } }
+    }
+
+    this.#plugins.delete(name)
+    this.invalidate()
+    return { ok: true }
   }
 
   /**

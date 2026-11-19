@@ -60,6 +60,11 @@ window.__ModuleLoader__.load({
         'installed.stepHint': 'Open the Marketplaces tab and install from a source there.',
         'action.install': 'Install',
         'action.installed': 'Installed',
+        'action.uninstall': 'Remove',
+        'action.confirm': 'Remove',
+        'action.cancel': 'Cancel',
+        'remove.ok': 'Removed {name}',
+        'remove.failed': 'Could not remove',
         'tabs.markets': 'Marketplaces',
         'tabs.installed': 'Installed',
         'update.available': 'Marketplace content changed',
@@ -112,6 +117,11 @@ window.__ModuleLoader__.load({
         'installed.stepHint': '先到「市场」标签里添加一个源，再从那里安装。',
         'action.install': '安装',
         'action.installed': '已安装',
+        'action.uninstall': '移除',
+        'action.confirm': '确认移除',
+        'action.cancel': '取消',
+        'remove.ok': '已移除 {name}',
+        'remove.failed': '移除失败',
         'tabs.markets': '市场',
         'tabs.installed': '已安装',
         'update.available': '市场有变化',
@@ -395,10 +405,26 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
       rowMetaInline: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
         color: 'var(--dsw-alias-label-secondary)',
         fontSize: '11px',
         fontVariantNumeric: 'tabular-nums',
         marginTop: '2px',
+        minHeight: '18px',
+      },
+      rowActions: { display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' },
+      dangerButton: {
+        padding: '2px 9px',
+        border: '1px solid var(--dsw-alias-state-error-primary)',
+        borderRadius: '6px',
+        background: 'transparent',
+        color: 'var(--dsw-alias-state-error-primary)',
+        font: 'inherit',
+        fontSize: '11px',
+        fontWeight: 500,
+        cursor: 'pointer',
       },
       rowMeta: {
         color: 'var(--dsw-alias-label-secondary)',
@@ -531,9 +557,12 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * @param {{ plugin: object, onHover: (hovered: boolean) => void }} props
+     * @param {{ plugin: object, onUninstall?: (name: string) => void, t?: (key: string) => string }} props
      */
-    function PluginRow({ plugin, onHover, t = translate }) {
+    function PluginRow({ plugin, onUninstall, t = translate }) {
+      const [confirming, setConfirming] = React.useState(false)
+      const [hovered, setHovered] = React.useState(false)
+
       const parts = []
       if (plugin.skills > 0) parts.push(`${String(plugin.skills)} ${t('row.skills')}`)
       if (plugin.agents > 0) parts.push(`${String(plugin.agents)} ${t('row.agents')}`)
@@ -550,12 +579,46 @@ window.__ModuleLoader__.load({
 
       const meta = parts.length === 0 ? t('row.empty') : parts.join(' · ')
 
+      // Removal is destructive and irreversible from the panel's side, so it
+      // asks once. A row without a handler simply has no control.
+      const control =
+        onUninstall === undefined
+          ? null
+          : confirming
+            ? h(
+                'span',
+                { style: styles.rowActions },
+                h(
+                  'button',
+                  { type: 'button', onClick: () => onUninstall(plugin.name), style: styles.dangerButton },
+                  t('action.confirm'),
+                ),
+                h(
+                  'button',
+                  { type: 'button', onClick: () => setConfirming(false), style: styles.ghost },
+                  t('action.cancel'),
+                ),
+              )
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: () => setConfirming(true),
+                  style: { ...styles.ghost, opacity: hovered ? 1 : 0 },
+                  'aria-label': `${t('action.uninstall')} ${plugin.name}`,
+                },
+                t('action.uninstall'),
+              )
+
       return h(
         'li',
         {
           style: styles.row,
-          onMouseEnter: () => onHover(true),
-          onMouseLeave: () => onHover(false),
+          onMouseEnter: () => setHovered(true),
+          onMouseLeave: () => {
+            setHovered(false)
+            setConfirming(false)
+          },
         },
         glyph,
         h(
@@ -570,7 +633,12 @@ window.__ModuleLoader__.load({
             { style: styles.rowDesc },
             plugin.description ?? plugin.skillsNamed.slice(0, 3).map((name) => `/${name}`).join('  ') ?? '',
           ),
-          h('span', { style: styles.rowMetaInline }, meta),
+          h(
+            'span',
+            { style: styles.rowMetaInline },
+            meta,
+            control === null ? null : h('span', { style: styles.rowActions }, control),
+          ),
         ),
       )
     }
@@ -929,6 +997,27 @@ window.__ModuleLoader__.load({
         [load, loadMarkets],
       )
 
+      const uninstallPlugin = React.useCallback(
+        async (name) => {
+          setOutcome(undefined)
+          try {
+            const result = await mutateMarket({ action: 'uninstall', name })
+            setOutcome(
+              result.ok
+                ? { ok: true, name, skills: 0, agents: 0, removed: true }
+                : { ok: false, error: result.error },
+            )
+            if (result.ok) {
+              load()
+              await loadMarkets(false)
+            }
+          } catch (error) {
+            setOutcome({ ok: false, error: { code: 'network', message: String(error) } })
+          }
+        },
+        [load, loadMarkets],
+      )
+
       if (state.status === 'loading') {
         return h('div', { style: styles.page }, h('div', { style: styles.column }, h('p', { style: styles.subtitle }, t('page.reading'))))
       }
@@ -1061,8 +1150,10 @@ window.__ModuleLoader__.load({
                 'p',
                 { style: styles.notice(outcome.ok) },
                 outcome.ok
-                  ? `${t('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${t('row.skills')} · ${String(outcome.agents ?? 0)} ${t('row.agents')}`
-                  : `${t('add.failed')}: ${outcome.error?.message ?? ''}`,
+                  ? outcome.removed === true
+                    ? t('remove.ok').replace('{name}', String(outcome.name))
+                    : `${t('add.ok')} ${String(outcome.name)} · ${String(outcome.skills ?? 0)} ${t('row.skills')} · ${String(outcome.agents ?? 0)} ${t('row.agents')}`
+                  : `${outcome.removed === true ? t('remove.failed') : t('add.failed')}: ${outcome.error?.message ?? ''}`,
               ),
 
           h(
@@ -1214,7 +1305,14 @@ window.__ModuleLoader__.load({
                   : h(
                       'ul',
                       { style: styles.list },
-                      shown.map((plugin) => h(PluginRow, { key: plugin.name, plugin, t, onHover: () => {} })),
+                      shown.map((plugin) =>
+                        h(PluginRow, {
+                          key: plugin.name,
+                          plugin,
+                          t,
+                          onUninstall: uninstallPlugin,
+                        }),
+                      ),
                     ),
               ),
         ),
@@ -1228,12 +1326,32 @@ window.__ModuleLoader__.load({
         // and no `inject`. Calling `ctx.inject` throws and takes the whole
         // apply with it, which is why the panel kept falling back to English.
         const bind = () => {
-          const locale = ctx.get('locale')
+          let locale
+          try {
+            locale = ctx.get('locale')
+          } catch {
+            return false
+          }
           if (locale === undefined) return false
-          if (localeService !== locale) {
-            localeService = locale
+          if (localeService === locale) return true
+
+          // Registration and binding are separate failures: a dictionary the
+          // service rejects must not leave the panel without a translate
+          // function, because a throwing apply loses the whole panel.
+          try {
             locale.register('plugin-file', TEXTS)
-            translate = locale.bind('plugin-file')
+          } catch {
+            // The namespace may already be registered by a previous mount; the
+            // bind below still returns a working `t` for those keys.
+          }
+          try {
+            const bound = locale.bind('plugin-file')
+            if (typeof bound === 'function') {
+              translate = bound
+              localeService = locale
+            }
+          } catch {
+            return false
           }
           return true
         }
