@@ -116,11 +116,25 @@ function inventoryService(loader) {
     },
 
     /**
-     * @param {string} id
+     * @param {string} name
      */
     async removeMarket(id) {
       const removed = await markets.remove(id)
       return { ok: removed }
+    },
+
+    /**
+     * Read one plugin's icon bytes.
+     *
+     * The loader owns discovery, so it owns the icon paths too; this forwards
+     * rather than duplicating the lookup.
+     *
+     * @param {string} name
+     * @returns {Promise<{ body: Buffer, type: string } | undefined>}
+     */
+    async icon(name) {
+      await loader.refresh()
+      return loader.icon(name)
     },
   }
 }
