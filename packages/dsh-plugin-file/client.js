@@ -18,6 +18,53 @@ window.__ModuleLoader__.load({
     const PANEL_ORDER = 30
 
     /**
+     * Text for both baseline locales.
+     *
+     * Registered through the Client locale service rather than branched in the
+     * component: a hardcoded language would ignore the user's choice, and the
+     * service already carries the active-locale subscription.
+     */
+    const TEXTS = {
+      en: {
+        'entry.label': 'File plugins',
+        'page.title': 'File plugins',
+        'page.subtitle':
+          'Drop a directory with a plugin.json into plugins. Skills and commands appear in the / menu; agents appear as presets.',
+        'page.reading': 'Reading plugins…',
+        'page.error': 'Could not read the plugin inventory',
+        'empty.title': 'No plugins found',
+        'empty.hint': 'Create hello/plugin.json inside the directory above to get started.',
+        'card.skills': 'skills',
+        'card.agents': 'agents',
+        'card.hooks': 'hooks',
+        'card.empty': 'no entries',
+      },
+      zh: {
+        'entry.label': '文件插件',
+        'page.title': '文件插件',
+        'page.subtitle':
+          '把一个带 plugin.json 的目录放进插件目录。技能和命令会出现在 / 菜单里，子代理会出现在预设里。',
+        'page.reading': '正在读取插件…',
+        'page.error': '无法读取插件清单',
+        'empty.title': '没有发现插件',
+        'empty.hint': '在上面的目录里创建 hello/plugin.json 即可开始。',
+        'card.skills': '个技能',
+        'card.agents': '个子代理',
+        'card.hooks': '个钩子',
+        'card.empty': '没有内容',
+      },
+    }
+
+    /**
+     * Fallback used until the locale service binds, and for any language the
+     * dictionaries do not cover.
+     *
+     * @param {string} key
+     * @returns {string}
+     */
+    let translate = (key) => TEXTS.en[key] ?? key
+
+    /**
      * Sidebar glyph: a folder holding a document, matching the bundle icon.
      *
      * @param {{ size: number }} props the shell's icon share.
@@ -114,9 +161,9 @@ window.__ModuleLoader__.load({
      */
     function PluginCard({ plugin }) {
       const meta = []
-      if (plugin.skills > 0) meta.push(`${String(plugin.skills)} skill${plugin.skills === 1 ? '' : 's'}`)
-      if (plugin.agents > 0) meta.push(`${String(plugin.agents)} agent${plugin.agents === 1 ? '' : 's'}`)
-      if (plugin.hasHooks) meta.push('hooks')
+      if (plugin.skills > 0) meta.push(`${String(plugin.skills)} ${translate('card.skills')}`)
+      if (plugin.agents > 0) meta.push(`${String(plugin.agents)} ${translate('card.agents')}`)
+      if (plugin.hasHooks) meta.push(translate('card.hooks'))
 
       return h(
         'li',
@@ -125,7 +172,7 @@ window.__ModuleLoader__.load({
           'div',
           { style: styles.cardHead },
           h('span', { style: styles.name }, plugin.name),
-          h('span', { style: styles.tag }, meta.length === 0 ? 'no entries' : meta.join(' · ')),
+          h('span', { style: styles.tag }, meta.length === 0 ? translate('card.empty') : meta.join(' · ')),
         ),
         plugin.description === undefined ? null : h('p', { style: styles.desc }, plugin.description),
         plugin.skillsNamed.length === 0
@@ -148,7 +195,9 @@ window.__ModuleLoader__.load({
       })
       if (!response.ok) {
         const detail = await response.text().catch(() => '')
-        throw new Error(`${url} -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`)
+        throw new Error(
+          `${url} -> ${String(response.status)} ${response.statusText}${detail === '' ? '' : `: ${detail.slice(0, 200)}`}`,
+        )
       }
       return response.json()
     }
@@ -157,11 +206,21 @@ window.__ModuleLoader__.load({
      * The main-slot page.
      *
      * Reads the Host inventory once per mount. A failed read is shown in
-     * place: an empty list would misreport a load failure as "no plugins
-     * installed".
+     * place: an empty list would misreport a load failure as "no plugins".
      */
     function PanelPage() {
       const [state, setState] = React.useState({ status: 'loading' })
+      const [, bumpLocale] = React.useState(0)
+
+      // Re-render on a language switch. The locale service publishes through
+      // a snapshot, so the component subscribes instead of reading once.
+      React.useEffect(() => {
+        const locale = localeService
+        if (locale === undefined) return undefined
+        return locale.subscribe(() => {
+          bumpLocale((value) => value + 1)
+        })
+      }, [])
 
       React.useEffect(() => {
         let alive = true
@@ -181,14 +240,14 @@ window.__ModuleLoader__.load({
       }, [])
 
       if (state.status === 'loading') {
-        return h('div', { style: styles.page }, h('p', { style: styles.subtitle }, 'Reading plugins…'))
+        return h('div', { style: styles.page }, h('p', { style: styles.subtitle }, translate('page.reading')))
       }
 
       if (state.status === 'error') {
         return h(
           'div',
           { style: styles.page },
-          h('p', { style: styles.error }, `Could not read the plugin inventory: ${String(state.error)}`),
+          h('p', { style: styles.error }, `${translate('page.error')}: ${String(state.error)}`),
         )
       }
 
@@ -200,28 +259,34 @@ window.__ModuleLoader__.load({
         h(
           'header',
           { style: styles.header },
-          h('h1', { style: styles.title }, 'File plugins'),
-          h(
-            'p',
-            { style: styles.subtitle },
-            'Drop a directory with a plugin.json here. Skills and commands appear in the / menu; agents appear as presets.',
-          ),
+          h('h1', { style: styles.title }, translate('page.title')),
+          h('p', { style: styles.subtitle }, translate('page.subtitle')),
         ),
         h('p', { style: styles.path }, root),
         plugins.length === 0
           ? h(
               'div',
               { style: styles.empty },
-              h('strong', { style: styles.name }, 'No plugins found'),
-              h('span', null, `Create ${root}\\hello\\plugin.json to get started.`),
+              h('strong', { style: styles.name }, translate('empty.title')),
+              h('span', null, translate('empty.hint')),
             )
           : h('ul', { style: styles.list }, plugins.map((plugin) => h(PluginCard, { key: plugin.name, plugin }))),
       )
     }
 
+    /** Bound `t` for this namespace once the locale service is available. */
+    let localeService
+
     return {
       inject: ['slots'],
       apply(ctx) {
+        const locale = ctx.get('locale')
+        if (locale !== undefined) {
+          localeService = locale
+          locale.register('plugin-file', TEXTS)
+          translate = locale.bind('plugin-file')
+        }
+
         const slots = ctx.slots
         slots.inject('sidebar.panellist', () =>
           slots.register(
@@ -229,7 +294,9 @@ window.__ModuleLoader__.load({
               name: 'sidebar.panellist',
               id: PANEL_ID,
               order: PANEL_ORDER,
-              label: () => 'File plugins',
+              // A thunk is re-read on every projection, so the row label
+              // follows a language switch without re-registering.
+              label: () => translate('entry.label'),
             },
             PanelIcon,
           ),
