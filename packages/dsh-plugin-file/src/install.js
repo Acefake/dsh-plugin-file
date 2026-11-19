@@ -130,15 +130,25 @@ export async function installFromUrl(input, options) {
     // A GitHub archive nests everything under one folder named after the repo
     // and ref; a subdirectory link then points deeper. Resolve to the
     // directory that actually holds the manifest.
-    const pluginDir = await locateManifest(unpacked, subpath)
-    if (pluginDir === undefined) {
+    const located = await locateManifest(unpacked, subpath)
+
+    if (located === undefined) {
       return fail(
         'no-manifest',
         subpath === undefined
-          ? 'the repository has no plugin.json at its root or one level down'
+          ? 'the repository has no plugin.json; if it holds several plugins, open the one you want and copy that link'
           : `the path ${subpath} has no plugin.json`,
       )
     }
+
+    if (typeof located === 'object') {
+      return fail(
+        'multiple-plugins',
+        `this repository holds several plugins (${located.multiple.join(', ')}); open the one you want and copy that link instead`,
+      )
+    }
+
+    const pluginDir = located
 
     const manifest = await readManifest(pluginDir)
     if (!manifest.ok) return manifest
@@ -296,7 +306,87 @@ async function locateManifest(unpacked, subpath) {
     }
   }
 
-  return roots[0]
+  // A repository may keep its plugins under a grouping directory — `plugins/`
+  // is the Claude Code convention — so a manifest below one grouping level is
+  // still this archive's candidate. The walk descends exactly one extra level
+  // and only through known grouping names, so an arbitrary repository cannot
+  // make the installer traverse its tree.
+  if (roots.length === 0) {
+    for (const name of top) {
+      const base = join(unpacked, name)
+
+      if (GROUPING_DIRECTORIES.has(name)) {
+        for (const nested of await subdirectories(base)) {
+          if (SKIP_DIRECTORIES.has(nested)) continue
+          const candidate = join(base, nested)
+          if (await isFile(join(candidate, 'plugin.json'))) roots.push(candidate)
+        }
+        continue
+      }
+
+      if (SKIP_DIRECTORIES.has(name)) continue
+      for (const nested of await subdirectories(base)) {
+        if (!GROUPING_DIRECTORIES.has(nested)) continue
+        for (const inner of await subdirectories(join(base, nested))) {
+          const candidate = join(base, nested, inner)
+          if (await isFile(join(candidate, 'plugin.json'))) roots.push(candidate)
+        }
+      }
+    }
+  }
+
+  // Multiple manifests under a grouping directory mean the link named a
+  // repository of plugins, not one plugin. Installing the first would silently
+  // drop the rest, so this is reported and the caller is told what to pick.
+  if (roots.length > 1 && subpath === undefined) {
+    const names = []
+    for (const root of roots) {
+      const manifest = await readFile(join(root, 'plugin.json'), 'utf8').catch(() => undefined)
+      if (manifest === undefined) continue
+      try {
+        const parsed = JSON.parse(manifest)
+        if (typeof parsed?.name === 'string') names.push(parsed.name)
+      } catch {
+        // A malformed sibling does not change that this archive holds several.
+      }
+    }
+    if (names.length > 1) {
+      return { multiple: names }
+    }
+  }
+
+  return roots[0] === undefined ? undefined : roots[0]
+}
+
+/** Directory names that group plugins rather than hold one. */
+const GROUPING_DIRECTORIES = new Set(['plugins', 'extensions', 'addons'])
+
+/** Directories never worth descending into when looking for a manifest. */
+const SKIP_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  '.github',
+  'dist',
+  'build',
+  'docs',
+  'test',
+  'tests',
+  '__tests__',
+  'examples',
+  'assets',
+])
+
+/**
+ * @param {string} dir
+ * @returns {Promise<string[]>}
+ */
+async function subdirectories(dir) {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true })
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  } catch {
+    return []
+  }
 }
 
 /**
